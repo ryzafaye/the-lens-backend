@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Head, router } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
+import { router } from '../../router/index.js';
+import { apiFetch } from '../../services/api.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({ portal: { type: String, required: true }, articles: { type: Array, default: () => [] }, categories: { type: Array, default: () => [] } });
@@ -9,7 +11,6 @@ const status = ref('active');
 const editor = ref(null);
 const busy = ref(false);
 const message = ref('');
-const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 const filteredArticles = computed(() => props.articles.filter((article) => {
     const matchesStatus = status.value === 'all' || (status.value === 'archived' ? article.isArchived : !article.isArchived);
     const text = `${article.title} ${article.author} ${article.category}`.toLowerCase();
@@ -20,7 +21,7 @@ async function send(path, method, data = {}) {
     busy.value = true;
     message.value = '';
     try {
-        const response = await fetch(path, { method, credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest' }, body: method === 'GET' ? undefined : JSON.stringify(data) });
+        const response = await apiFetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(data) });
         const result = await response.json();
         if (!response.ok || result.success === false) throw new Error(result.message ?? 'The change could not be saved.');
         message.value = result.message ?? 'Saved.';
@@ -50,9 +51,9 @@ function deleteArticle(article) {
 
 <template>
     <AdminLayout title="Manage Articles">
-        <Head>
+        <PageHead>
             <link rel="stylesheet" href="/css/executive-manage-articles.css">
-        </Head>
+        </PageHead>
         <main class="workspace-page">
             <header class="workspace-header"><div><p class="workspace-eyebrow">PUBLICATION LIBRARY</p><h1>Manage Articles &amp; Archives</h1><p>Review published stories, edit details, and manage archived articles.</p></div></header>
             <p v-if="message" class="workspace-notice" role="status">{{ message }}</p>

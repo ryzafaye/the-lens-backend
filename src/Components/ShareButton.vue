@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue';
+import { apiRequest } from '../services/api.js';
 
 const props = defineProps({
     articleId: { type: Number, required: true },
@@ -14,10 +15,7 @@ async function copyArticleLink() {
     try {
         await navigator.clipboard.writeText(props.articleUrl);
 
-        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
-        const { data } = await window.axios.post(`/article/${props.articleId}/share`, {}, {
-            headers: { 'X-CSRF-TOKEN': csrfToken ?? '' },
-        });
+        const { data } = await apiRequest(`/article/${props.articleId}/share`, { method: 'POST', data: {} });
 
         if (typeof data.shares === 'number') {
             count.value = data.shares;

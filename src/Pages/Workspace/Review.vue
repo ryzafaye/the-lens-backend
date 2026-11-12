@@ -1,6 +1,8 @@
 <script setup>
 import { ref } from 'vue';
-import { Head, router } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
+import { router } from '../../router/index.js';
+import { apiFetch } from '../../services/api.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({ portal: { type: String, required: true }, articles: { type: Array, default: () => [] }, sort: { type: String, default: 'newest' } });
@@ -9,14 +11,13 @@ const editor = ref(selected.value ? { title: selected.value.title, excerpt: sele
 const remarks = ref('');
 const busy = ref(false);
 const message = ref('');
-const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 
 function openArticle(article) { selected.value = article; editor.value = { title: article.title, excerpt: article.excerpt ?? '', content: article.content ?? '' }; remarks.value = article.remarks ?? ''; message.value = ''; }
 async function saveChanges() {
     if (!selected.value || !editor.value) return;
     busy.value = true;
     try {
-        const response = await fetch(`/${props.portal}/review-articles/${selected.value.id}`, { method: 'PUT', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(editor.value) });
+        const response = await apiFetch(`/${props.portal}/review-articles/${selected.value.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editor.value) });
         const result = await response.json();
         if (!response.ok || !result.success) throw new Error(result.message ?? 'Could not save article changes.');
         message.value = result.message;
@@ -36,7 +37,7 @@ function returnForRevision() {
 async function sendReviewAction(action, data) {
     busy.value = true;
     try {
-        const response = await fetch(`/${props.portal}/review-articles/${selected.value.id}/${action}`, { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(data) });
+        const response = await apiFetch(`/${props.portal}/review-articles/${selected.value.id}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
         const result = await response.json();
         if (!response.ok || result.success === false) throw new Error(result.message ?? 'The article could not be updated.');
         selected.value = null;
@@ -49,7 +50,7 @@ async function sendReviewAction(action, data) {
 
 <template>
     <AdminLayout title="Review Articles">
-        <Head><link rel="stylesheet" href="/css/executive-review-articles.css"></Head>
+        <PageHead><link rel="stylesheet" href="/css/executive-review-articles.css"></PageHead>
         <main class="review-page"><header class="review-heading"><div><p class="review-eyebrow">EDITORIAL DESK</p><h1>Review Articles</h1><p>Read submissions carefully, make edits, and guide writers with clear feedback.</p></div><label class="review-sort">Sort <select :value="sort" @change="router.get(`/${portal}/review-articles`, { sort: $event.target.value }, { preserveState: true, preserveScroll: true })"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label></header>
             <p v-if="message" class="review-notice" role="status">{{ message }}</p>
             <div class="review-layout"><nav class="review-list" aria-label="Articles awaiting review"><button v-for="article in articles" :key="article.id" type="button" class="review-list-item" :class="{ selected: selected?.id === article.id }" @click="openArticle(article)"><span class="review-item-top"><span>{{ article.category }}</span><small>{{ article.date }}</small></span><strong>{{ article.title }}</strong><span class="review-item-author">{{ article.author }}<template v-if="article.endorsedBy"> · Endorsed by {{ article.endorsedBy }}</template></span></button><p v-if="!articles.length" class="review-empty-small">There are no articles waiting for review.</p></nav>

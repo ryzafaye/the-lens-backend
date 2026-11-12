@@ -1,16 +1,24 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { Head, usePage } from '@inertiajs/vue3';
+import PageHead from '../Components/PageHead.vue';
+import { apiFetch } from '../services/api.js';
+import { router } from '../router/index.js';
+import { updateShared, useAppState } from '../state/appState.js';
 
 defineProps({ title: { type: String, default: 'Dashboard' } });
 
-const page = usePage();
+const page = useAppState();
 const mobileOpen = ref(false);
 const timeLabel = ref('');
 const user = computed(() => page.props.auth?.user ?? {});
 const role = computed(() => user.value.role ?? 'Member');
 const firstName = computed(() => user.value.name?.trim().split(/\s+/)[0] ?? 'Member');
-const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+async function logout() {
+    const response = await apiFetch('/logout', { method: 'POST' });
+    if (!response.ok) return;
+    updateShared({ auth: { user: null } });
+    router.visit('/login');
+}
 
 const prefix = computed(() => {
     const value = role.value.toLowerCase();
@@ -120,18 +128,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <Head :title="`${title} | The Lens`">
+    <PageHead :title="`${title} | The Lens`">
         <link rel="stylesheet" href="/css/executive-dashboard.css">
         <link rel="stylesheet" href="/css/executive-modals.css">
         <link rel="stylesheet" href="/css/writer-dashboard.css">
-    </Head>
+    </PageHead>
     <aside id="sidebar" class="sidebar" :class="{ 'is-open': mobileOpen }" aria-label="Member portal navigation">
         <div class="sidebar-top-section">
             <div class="sidebar-header"><a href="/" class="sidebar-brand-lockup"><span class="sidebar-logo-square"><img :src="'/images/logo.jpg'" alt="The Lens logo"></span><span class="sidebar-brand-name">The Lens Publication</span></a></div>
             <div class="sidebar-profile"><div class="profile-avatar"><img :src="user.avatarUrl ?? '/images/member-placeholder.svg'" :alt="`${user.name ?? 'Member'} avatar`"></div><div class="profile-name">{{ user.name ?? 'Member' }}</div><div class="profile-role-text">{{ role }}</div></div>
             <nav class="sidebar-nav" aria-label="Main navigation"><a v-for="[label, href, icon] in navItems" :key="href" :href="href" class="sidebar-nav-item" :class="{ active: currentPath === href || (href !== `/${prefix}/dashboard` && currentPath.startsWith(`${href}/`)) }"><i :class="icon" aria-hidden="true"></i><span>{{ label }}</span></a></nav>
         </div>
-        <div class="sidebar-footer"><a href="/" target="_blank" rel="noopener noreferrer" class="sidebar-footer-link"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i><span>View public site</span></a><form action="/logout" method="post"><input type="hidden" name="_token" :value="csrfToken"><button type="submit" class="sidebar-footer-link logout-btn"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i><span>Logout</span></button></form></div>
+        <div class="sidebar-footer"><a href="/" target="_blank" rel="noopener noreferrer" class="sidebar-footer-link"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i><span>View public site</span></a><form @submit.prevent="logout"><button type="submit" class="sidebar-footer-link logout-btn"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i><span>Logout</span></button></form></div>
     </aside>
     <div v-if="mobileOpen" class="sidebar-backdrop" @click="mobileOpen = false"></div>
     <div class="main-wrapper">

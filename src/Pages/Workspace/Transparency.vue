@@ -1,11 +1,11 @@
 <script setup>
-import { Head } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 </script>
 
 <template>
     <AdminLayout title="Transparency">
-        <Head><link rel="stylesheet" href="/css/executive-transparency.css"></Head>
+        <PageHead><link rel="stylesheet" href="/css/executive-transparency.css"></PageHead>
         <main class="transparency-page"><section class="transparency-card"><span><i class="fa-solid fa-hammer"></i></span><small><b></b> Under development</small><h1>This page is under development</h1><p>Transparency reports will be available here.</p></section></main>
     </AdminLayout>
 </template>

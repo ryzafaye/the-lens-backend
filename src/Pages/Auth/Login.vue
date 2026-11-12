@@ -1,18 +1,40 @@
 <script setup>
 import { ref } from 'vue';
-import { Head, usePage } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
+import { useApiForm } from '../../composables/useApiForm.js';
+import { useAppState } from '../../state/appState.js';
+import { router } from '../../router/index.js';
 
-defineProps({
+const props = defineProps({
     studentNumber: { type: String, default: '' },
 });
 
-const page = usePage();
+const page = useAppState();
 const showPassword = ref(false);
-const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+const form = useApiForm({ student_number: props.studentNumber ?? '', password: '' });
+
+function submit() {
+    form.post('/login', {
+        onSuccess: (result) => {
+            const user = result.user ?? result.shared?.auth?.user ?? page.props.auth?.user;
+            const role = String(user?.role ?? '').toLowerCase();
+            const portal = user?.portal
+                ?? (role.includes('cartoonist') ? 'cartoonist'
+                    : role.includes('photojournalist') || role.includes('media team') ? 'media'
+                    : role.includes('m&pc') ? 'mpc'
+                    : role.includes('editor-in-chief') || role.includes('associate editor') ? 'eic'
+                    : role === 'writer' ? 'writer'
+                    : role.endsWith('head') ? 'section-head'
+                    : 'executive');
+            const destination = result.redirect ?? new URLSearchParams(window.location.search).get('redirect') ?? `/${portal}/dashboard`;
+            router.visit(destination);
+        },
+    });
+}
 </script>
 
 <template>
-    <Head title="Login | The Lens" />
+    <PageHead title="Login | The Lens" />
     <main class="min-h-screen bg-white font-body text-stone-900 flex items-center justify-center p-4 sm:p-8 md:p-12 relative overflow-x-hidden">
         <div class="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(112,15,43,0.04),transparent_70%)]"></div>
         <div class="book-wrapper w-full max-w-4xl lg:max-w-5xl relative z-10 my-6">
@@ -26,11 +48,11 @@ const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? 
                     <a href="/" class="absolute top-4 right-4 sm:top-8 sm:right-8 z-30 group inline-flex items-center gap-2 text-xs sm:text-sm font-medium text-stone-500 hover:text-wine py-1.5 px-3 rounded-lg hover:bg-stone-100" aria-label="Back to public site"><i class="fa-solid fa-arrow-left text-xs" aria-hidden="true"></i><span>Back to site</span></a>
                     <div class="w-full max-w-sm mx-auto relative z-20 pt-6">
                         <div class="mb-6 sm:mb-8"><span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold tracking-widest uppercase bg-rose-900/10 text-rose-900 mb-3">Member Portal</span><h1 class="font-display text-2xl sm:text-3xl font-bold text-stone-900 tracking-tight">Sign In</h1><p class="mt-1.5 text-sm text-stone-500">Enter your student number and password to proceed.</p></div>
-                        <div v-if="page.props.errors?.student_number" class="mb-6 p-3.5 rounded-xl text-xs sm:text-sm font-medium bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-2" role="alert"><i class="fa-solid fa-circle-exclamation text-rose-500" aria-hidden="true"></i><span>{{ page.props.errors.student_number }}</span></div>
-                        <form id="login-form" method="POST" action="/login" class="space-y-5"><input type="hidden" name="_token" :value="csrfToken">
-                            <div class="space-y-1.5"><label for="student-number" class="block text-xs font-semibold uppercase tracking-wider text-stone-800">Student Number</label><div class="relative group"><div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-stone-400"><i class="fa-regular fa-id-card text-base"></i></div><input type="text" id="student-number" name="student_number" :value="studentNumber" required autocomplete="username" placeholder="0000-00000-BN-0" class="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-stone-200 bg-stone-50/60 text-stone-900 placeholder:text-stone-400 text-sm font-medium tracking-wide focus:outline-none focus:border-rose-900 focus:bg-white focus:ring-4 focus:ring-rose-900/10 shadow-sm"></div></div>
-                            <div class="space-y-1.5"><label for="password" class="block text-xs font-semibold uppercase tracking-wider text-stone-800">Password</label><div class="relative group"><div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-stone-400"><i class="fa-solid fa-lock text-sm"></i></div><input :type="showPassword ? 'text' : 'password'" id="password" name="password" required autocomplete="current-password" placeholder="Enter your password" class="w-full pl-10 pr-11 py-3 rounded-xl border-2 border-stone-200 bg-stone-50/60 text-stone-900 placeholder:text-stone-400 text-sm focus:outline-none focus:border-rose-900 focus:bg-white focus:ring-4 focus:ring-rose-900/10 shadow-sm"><button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-stone-400 hover:text-stone-700" :aria-label="showPassword ? 'Hide password' : 'Show password'"><i :class="showPassword ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye'" aria-hidden="true"></i></button></div></div>
-                            <div class="pt-2"><button type="submit" class="shimmer-button w-full flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl bg-gradient-to-r from-[#700f2b] to-[#8d1337] hover:from-[#5e0c24] hover:to-[#700f2b] text-white font-medium text-sm tracking-wide shadow-md shadow-rose-900/25"><span>Log In</span><i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i></button></div>
+                        <div v-if="form.errors.student_number || form.errors.general || page.props.errors?.student_number" class="mb-6 p-3.5 rounded-xl text-xs sm:text-sm font-medium bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-2" role="alert"><i class="fa-solid fa-circle-exclamation text-rose-500" aria-hidden="true"></i><span>{{ form.errors.student_number || form.errors.general || page.props.errors.student_number }}</span></div>
+                        <form id="login-form" class="space-y-5" @submit.prevent="submit">
+                            <div class="space-y-1.5"><label for="student-number" class="block text-xs font-semibold uppercase tracking-wider text-stone-800">Student Number</label><div class="relative group"><div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-stone-400"><i class="fa-regular fa-id-card text-base"></i></div><input type="text" id="student-number" v-model="form.student_number" required autocomplete="username" placeholder="0000-00000-BN-0" class="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-stone-200 bg-stone-50/60 text-stone-900 placeholder:text-stone-400 text-sm font-medium tracking-wide focus:outline-none focus:border-rose-900 focus:bg-white focus:ring-4 focus:ring-rose-900/10 shadow-sm"></div></div>
+                            <div class="space-y-1.5"><label for="password" class="block text-xs font-semibold uppercase tracking-wider text-stone-800">Password</label><div class="relative group"><div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-stone-400"><i class="fa-solid fa-lock text-sm"></i></div><input v-model="form.password" :type="showPassword ? 'text' : 'password'" id="password" required autocomplete="current-password" placeholder="Enter your password" class="w-full pl-10 pr-11 py-3 rounded-xl border-2 border-stone-200 bg-stone-50/60 text-stone-900 placeholder:text-stone-400 text-sm focus:outline-none focus:border-rose-900 focus:bg-white focus:ring-4 focus:ring-rose-900/10 shadow-sm"><button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-stone-400 hover:text-stone-700" :aria-label="showPassword ? 'Hide password' : 'Show password'"><i :class="showPassword ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye'" aria-hidden="true"></i></button></div></div>
+                            <div class="pt-2"><button type="submit" :disabled="form.processing" class="shimmer-button w-full flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl bg-gradient-to-r from-[#700f2b] to-[#8d1337] hover:from-[#5e0c24] hover:to-[#700f2b] text-white font-medium text-sm tracking-wide shadow-md shadow-rose-900/25"><span>{{ form.processing ? 'Signing in…' : 'Log In' }}</span><i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i></button></div>
                         </form>
                     </div>
                 </section>

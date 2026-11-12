@@ -1,17 +1,19 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
-import { Head, router, usePage } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
+import { router } from '../../router/index.js';
+import { apiFetch } from '../../services/api.js';
+import { useAppState } from '../../state/appState.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({ portal: { type: String, required: true }, officers: { type: Array, default: () => [] }, roles: { type: Array, default: () => [] } });
-const page = usePage();
+const page = useAppState();
 const query = ref('');
 const filter = ref('all');
 const form = reactive({ full_name: '', student_number: '', role_id: '' });
 const errors = ref({});
 const notice = ref('');
 const busy = ref(false);
-const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 const filteredOfficers = computed(() => props.officers.filter((officer) => {
     const matchesQuery = `${officer.name} ${officer.studentNumber} ${officer.role}`.toLowerCase().includes(query.value.trim().toLowerCase());
     return matchesQuery && (filter.value === 'all' || officer.status === filter.value);
@@ -20,7 +22,7 @@ async function send(path, method, data) {
     busy.value = true;
     notice.value = '';
     try {
-        const response = await fetch(path, { method, credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(data) });
+        const response = await apiFetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
         const result = await response.json();
         if (!response.ok || result.success === false) {
             errors.value = result.errors ?? {};
@@ -46,7 +48,7 @@ function toggleStatus(officer) { const next = officer.status === 'deactivated' ?
 
 <template>
     <AdminLayout title="Manage Accounts">
-        <Head><link rel="stylesheet" href="/css/executive-manage-accounts.css"></Head>
+        <PageHead><link rel="stylesheet" href="/css/executive-manage-accounts.css"></PageHead>
         <main class="accounts-page"><header class="accounts-heading"><div><p class="accounts-eyebrow">TEAM ADMINISTRATION</p><h1>Manage Accounts</h1><p>Create newsroom accounts and manage roles and access.</p></div><span class="accounts-total">{{ officers.length }} accounts</span></header>
             <p v-if="notice" class="accounts-notice" role="status">{{ notice }}</p>
             <section class="accounts-create"><div><h2>Create account</h2><p>New accounts start with the temporary password <strong>password123</strong>.</p></div><form @submit.prevent="addOfficer"><label>Full name<input v-model="form.full_name" maxlength="255" required autocomplete="name"><small v-if="errors.full_name">{{ errors.full_name[0] }}</small></label><label>Student number<input v-model="form.student_number" maxlength="50" required autocomplete="off"><small v-if="errors.student_number">{{ errors.student_number[0] }}</small></label><label>Role<select v-model="form.role_id" required><option value="" disabled>Select role</option><option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option></select><small v-if="errors.role_id">{{ errors.role_id[0] }}</small></label><button type="submit" :disabled="busy"><i class="fa-solid fa-user-plus"></i> {{ busy ? 'Creating…' : 'Create account' }}</button></form></section>

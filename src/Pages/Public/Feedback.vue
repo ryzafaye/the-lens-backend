@@ -1,13 +1,14 @@
 <script setup>
-import { useForm, usePage } from '@inertiajs/vue3';
+import { useApiForm } from '../../composables/useApiForm.js';
+import { useAppState } from '../../state/appState.js';
 import PublicLayout from '../../Layouts/PublicLayout.vue';
 
 const props = defineProps({
     oldInput: { type: Object, default: () => ({ name: '', subject: '', message: '' }) },
 });
 
-const page = usePage();
-const form = useForm({
+const page = useAppState();
+const form = useApiForm({
     name: props.oldInput.name ?? '',
     subject: props.oldInput.subject ?? '',
     message: props.oldInput.message ?? '',

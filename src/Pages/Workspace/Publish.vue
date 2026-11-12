@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Head, router } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
+import { router } from '../../router/index.js';
+import { apiFetch } from '../../services/api.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({ portal: { type: String, required: true }, articles: { type: Array, default: () => [] }, approvedCovers: { type: Array, default: () => [] }, counts: { type: Object, default: () => ({}) } });
@@ -12,14 +14,13 @@ const remarks = ref('');
 const coverSelections = ref({});
 const notice = ref('');
 const busy = ref(false);
-const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 const filteredArticles = computed(() => props.articles.filter((article) => article.status === tab.value && `${article.title} ${article.author} ${article.category}`.toLowerCase().includes(query.value.trim().toLowerCase())));
 
 async function action(url, data = {}) {
     busy.value = true;
     notice.value = '';
     try {
-        const response = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(data) });
+        const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
         const result = await response.json();
         if (!response.ok || result.success === false) throw new Error(result.message ?? 'The change could not be saved.');
         notice.value = result.message ?? 'Saved.';
@@ -52,10 +53,10 @@ function cleanText(value) { return String(value ?? '').replace(/<[^>]*>/g, ' ').
 
 <template>
     <AdminLayout title="Publish Article">
-        <Head>
+        <PageHead>
             <link rel="stylesheet" href="/css/mpc-publish-article.css">
             <link rel="stylesheet" href="/css/executive-manage-articles.css">
-        </Head>
+        </PageHead>
         <main class="publish-page"><header class="publish-header"><div><p class="publish-eyebrow">PUBLICATION RELEASE</p><h1>Publish Article</h1><p>Prepare approved stories for the public site and manage published releases.</p></div><label class="publish-search"><i class="fa-solid fa-magnifying-glass"></i><input v-model="query" type="search" placeholder="Search articles" aria-label="Search articles"></label></header>
             <p v-if="notice" class="publish-notice" role="status">{{ notice }}</p>
             <nav class="publish-tabs" aria-label="Publication workflow"><button v-for="option in [['ready','Ready to publish',counts.ready],['published','Published',counts.published],['unpublished','Unpublished',counts.unpublished],['covers','Approved covers',counts.covers]]" :key="option[0]" type="button" :class="{ active: tab === option[0] }" @click="tab = option[0]">{{ option[1] }} <span>{{ option[2] ?? (option[0] === 'covers' ? approvedCovers.length : 0) }}</span></button></nav>

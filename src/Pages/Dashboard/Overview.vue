@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { usePage } from '@inertiajs/vue3';
+import { useAppState } from '../../state/appState.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({
@@ -19,7 +19,7 @@ const props = defineProps({
     category: { type: String, default: null },
 });
 
-const page = usePage();
+const page = useAppState();
 const firstName = computed(() => page.props.auth?.user?.name?.trim().split(/\s+/)[0] ?? 'Member');
 const metricLabels = {
     total_views: 'Total views', monthly_views: 'Monthly views', published: 'Published articles',

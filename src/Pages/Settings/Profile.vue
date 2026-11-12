@@ -1,19 +1,21 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Head, useForm, usePage } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
+import { useApiForm } from '../../composables/useApiForm.js';
+import { useAppState } from '../../state/appState.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
-const page = usePage();
+const page = useAppState();
 const user = computed(() => page.props.auth?.user ?? {});
 const avatarInput = ref(null);
 const avatarPreview = ref(user.value.avatarUrl ?? '/images/member-placeholder.svg');
-const profileForm = useForm({
+const profileForm = useApiForm({
     full_name: user.value.name ?? '',
     student_number: user.value.studentNumber ?? '',
     avatar: null,
     remove_avatar: '0',
 });
-const passwordForm = useForm({ current_password: '', new_password: '', new_password_confirmation: '' });
+const passwordForm = useApiForm({ current_password: '', new_password: '', new_password_confirmation: '' });
 const passwordVisibility = ref({ current: false, next: false, confirm: false });
 const passwordLongEnough = computed(() => passwordForm.new_password.length >= 6);
 const passwordsMatch = computed(() => passwordForm.new_password.length > 0 && passwordForm.new_password === passwordForm.new_password_confirmation);
@@ -55,10 +57,10 @@ function updatePassword() {
 
 <template>
     <AdminLayout title="Profile Settings">
-        <Head>
+        <PageHead>
             <link rel="stylesheet" href="/css/shared-profile-settings.css">
             <link rel="stylesheet" href="/css/executive-profile-settings.css">
-        </Head>
+        </PageHead>
         <div class="profile-settings-container">
             <div class="profile-header-row"><div class="profile-title-wrap"><h1>Profile Settings</h1><p>Manage your personal details, assigned desk, and account security.</p></div></div>
             <div v-if="page.props.flash?.success" class="settings-notice" role="status">{{ page.props.flash.success }}</div>

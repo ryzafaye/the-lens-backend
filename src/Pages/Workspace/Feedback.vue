@@ -1,12 +1,12 @@
 <script setup>
-import { Head } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 defineProps({ portal: { type: String, required: true }, feedbacks: { type: Array, default: () => [] } });
 </script>
 
 <template>
     <AdminLayout title="Feedback Inbox">
-        <Head><link rel="stylesheet" href="/css/shared-feedback-inbox.css"></Head>
+        <PageHead><link rel="stylesheet" href="/css/shared-feedback-inbox.css"></PageHead>
         <main class="feedback-page"><header><p class="feedback-eyebrow">READER MESSAGES</p><h1>Feedback Inbox</h1><p>Messages sent through the public feedback form.</p></header><section v-if="!feedbacks.length" class="feedback-empty"><span><i class="fa-regular fa-envelope-open"></i></span><h2>No feedback messages yet</h2><p>Reader messages will appear here when they are connected to the newsroom inbox.</p></section><section v-else class="feedback-list"><article v-for="item in feedbacks" :key="item.id" class="feedback-card"><h2>{{ item.subject || 'Reader feedback' }}</h2><p>{{ item.message }}</p><small>{{ item.name }} · {{ item.created_at }}</small></article></section></main>
     </AdminLayout>
 </template>

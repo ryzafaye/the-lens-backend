@@ -1,21 +1,26 @@
-# The Lens Front End
+# The Lens Frontend
 
-Vue 3 client for The Lens Publication, built with Vite and Inertia.js. Laravel application code, database code, and server routes are maintained in the separate backend repository.
+Standalone Vue 3 single-page app for The Lens Publication. Laravel remains the backend and exposes JSON endpoints from its separate repository.
 
-## Build
+## Run and build
 
 ```sh
-npm install
+npm ci
+npm run dev
+```
+
+Copy `.env.example` to `.env` and set `VITE_API_BASE_URL` to the Laravel API origin, without the `/api` suffix. The frontend adds `/api` to its requests.
+
+For production:
+
+```sh
 npm run build
 ```
 
-Vite writes browser assets and a manifest to `dist/`. The backend repository should serve the public assets in `public/`, load the entry listed by the Vite manifest, and provide the Inertia root element with its initial page data.
+Vite writes a static SPA to `dist/`. Configure the frontend host to serve `index.html` for app routes such as `/archives` and `/writer/dashboard`.
 
-## Backend integration contract
+## Laravel API handoff
 
-- Resolve Inertia page names to the Vue components under `src/Pages/`.
-- Share `auth.user` with `id`, `name`, `studentNumber`, `role`, and `avatarUrl`, plus `flash.success`, `flash.error`, and `flash.warning`.
-- Preserve the existing route paths and methods used by the frontend forms and actions. Authenticated requests use the same-origin session and CSRF token.
-- Serve the static files under `public/css/` and `public/images/` from the app root.
+See [docs/api-contract.md](docs/api-contract.md) for page-data endpoints, action routes, response shapes, and authentication/CORS requirements.
 
-This repository contains the browser client and its static assets; the backend repository supplies the Inertia responses, authentication, data, and route handlers.
+The browser app uses Vue Router and a JSON API client. It does not require Laravel to serve its HTML page, and Laravel does not return Inertia responses.

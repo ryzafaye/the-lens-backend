@@ -1,5 +1,5 @@
 <script setup>
-import { Link } from '@inertiajs/vue3';
+import { RouterLink as Link } from 'vue-router';
 
 defineProps({
     article: { type: Object, required: true },

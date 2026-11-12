@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { router } from '../../router/index.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({

@@ -1,5 +1,5 @@
 <script setup>
-import { Head } from '@inertiajs/vue3';
+import PageHead from '../Components/PageHead.vue';
 import { onBeforeUnmount, onMounted } from 'vue';
 
 const props = defineProps({
@@ -26,9 +26,9 @@ const navItems = [
 </script>
 
 <template>
-    <Head :title="`${title} | The Lens`">
+    <PageHead :title="`${title} | The Lens`">
         <link rel="stylesheet" href="/css/main.css">
-    </Head>
+    </PageHead>
         <div :class="['min-h-screen bg-white text-stone-900 font-body antialiased flex flex-col', reader && 'h-screen overflow-hidden']">
         <header v-if="!reader" class="site-header w-full border-b border-stone-200 shadow-sm bg-white">
             <div class="top-bar">

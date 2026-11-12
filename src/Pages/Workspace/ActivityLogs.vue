@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Head } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({ portal: { type: String, required: true }, activities: { type: Array, default: () => [] } });
@@ -10,7 +10,7 @@ const filtered = computed(() => props.activities.filter((item) => `${item.causer
 
 <template>
     <AdminLayout title="Activity Logs">
-        <Head><link rel="stylesheet" href="/css/executive-activity-logs.css"></Head>
+        <PageHead><link rel="stylesheet" href="/css/executive-activity-logs.css"></PageHead>
         <main class="activity-page"><header><div><p class="activity-eyebrow">NEWSROOM HISTORY</p><h1>Activity Logs</h1><p>Recent editorial and account activity across your workspace.</p></div></header><label class="activity-search"><i class="fa-solid fa-magnifying-glass"></i><input v-model="query" type="search" placeholder="Search by person, action, or item"></label>
             <section v-if="filtered.length" class="activity-list"><article v-for="entry in filtered" :key="entry.id" class="activity-item"><img :src="entry.causerAvatar ?? entry.avatar" alt=""><div class="activity-main"><div class="activity-title"><strong>{{ entry.causer ?? entry.user }}</strong><span>{{ entry.causerRole }}</span></div><p>{{ entry.action }} <b>{{ entry.subjectName ?? entry.target }}</b><small v-if="entry.subjectType"> · {{ entry.subjectType }}</small></p><div class="activity-time"><span>{{ entry.formattedDate }}</span><span>{{ entry.timestampText ?? entry.time }}</span></div></div></article></section>
             <div v-else class="activity-empty"><i class="fa-regular fa-clock"></i><h2>{{ activities.length ? 'No matching activity' : 'No activity yet' }}</h2><p>{{ activities.length ? 'Try a different search.' : 'New activity will appear here as your team works.' }}</p></div>

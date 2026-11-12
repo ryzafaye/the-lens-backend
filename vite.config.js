@@ -5,16 +5,8 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
     plugins: [vue(), tailwindcss()],
     build: {
-        manifest: true,
+        manifest: 'manifest.json',
         outDir: 'dist',
         emptyOutDir: true,
-        rollupOptions: {
-            input: {
-                inertia: 'src/inertia.js',
-            },
-        },
-    },
-    server: {
-        cors: true,
     },
 });

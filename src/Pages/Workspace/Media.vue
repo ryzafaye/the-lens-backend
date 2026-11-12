@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Head, router } from '@inertiajs/vue3';
+import PageHead from '../../Components/PageHead.vue';
+import { router } from '../../router/index.js';
+import { apiFetch } from '../../services/api.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({ portal: { type: String, required: true }, kind: { type: String, required: true }, items: { type: Array, default: () => [] }, isSectionHead: { type: Boolean, default: false } });
@@ -10,7 +12,6 @@ const revisionItem = ref(null);
 const remarks = ref('');
 const notice = ref('');
 const busy = ref(false);
-const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 const isDesk = computed(() => ['desk', 'cartoon-desk'].includes(props.kind));
 const pageTitle = computed(() => ({ desk: 'Media Desk', library: 'Manage Media', cartoons: 'Manage Cartoons', 'cartoon-desk': 'Cartoon Desk' })[props.kind] ?? 'Manage Media');
 const submitHref = computed(() => `/${props.portal}/${props.kind === 'cartoons' || props.kind === 'cartoon-desk' ? 'submit-cartoon' : 'submit-media'}`);
@@ -30,7 +31,7 @@ async function postAction(url, data = {}) {
     busy.value = true;
     notice.value = '';
     try {
-        const response = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(data) });
+        const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
         const result = await response.json();
         if (!response.ok || result.success === false) throw new Error(result.message ?? 'The media item could not be updated.');
         notice.value = result.message ?? 'Media updated.';
@@ -57,10 +58,10 @@ function returnItem() {
 
 <template>
     <AdminLayout :title="pageTitle">
-        <Head>
+        <PageHead>
             <link rel="stylesheet" href="/css/executive-cover-review.css">
             <link rel="stylesheet" href="/css/media-manage-media.css">
-        </Head>
+        </PageHead>
         <main class="media-page"><header class="media-heading"><div><p class="media-eyebrow">{{ isDesk ? 'EDITORIAL REVIEW' : 'VISUAL LIBRARY' }}</p><h1>{{ pageTitle }}</h1><p>{{ isDesk ? 'Review artwork and share clear direction with contributors.' : 'Browse visual submissions and check their review status.' }}</p></div><a v-if="!isDesk" :href="submitHref" class="media-submit"><i :class="kind === 'cartoons' ? 'fa-solid fa-paintbrush' : 'fa-solid fa-camera'"></i>{{ kind === 'cartoons' ? 'Submit Cartoon' : 'Submit Media' }}</a></header>
             <p v-if="notice" class="media-notice" role="status">{{ notice }}</p>
             <div class="media-toolbar"><input v-model="query" type="search" placeholder="Search by title, contributor, or article" aria-label="Search visual submissions"><select v-model="filter" aria-label="Filter by review status"><option value="all">All statuses</option><option value="pending">Pending review</option><option value="revision">For revision</option><option value="approved">Approved or published</option></select><span>{{ filteredItems.length }} items</span></div>

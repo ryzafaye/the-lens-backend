@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { useApiForm } from '../../composables/useApiForm.js';
 import AdminLayout from '../../Layouts/AdminLayout.vue';
 
 const props = defineProps({
@@ -10,7 +10,7 @@ const props = defineProps({
     editingDraft: { type: Object, default: null },
 });
 
-const form = useForm({
+const form = useApiForm({
     article_id: props.editingDraft?.id ?? '',
     title: props.editingDraft?.title ?? '',
     category_id: props.editingDraft?.categoryId ?? '',
