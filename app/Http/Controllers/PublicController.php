@@ -65,6 +65,202 @@ class PublicController extends Controller
     }
 
     /**
+     * JSON API endpoint for the public homepage.
+     * Mirrors the data prepared in index() but returns a JSON payload.
+     */
+    public function apiHome(): JsonResponse
+    {
+        // Re‑use the same query logic as index()
+        $baseQuery = Article::with(['coverImage', 'user.role', 'category'])
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false)
+            ->latest('published_at');
+
+        $featuredArticle = (clone $baseQuery)->first();
+
+        $latestArticles = (clone $baseQuery)
+            ->when($featuredArticle, fn ($q) => $q->where('id', '!=', $featuredArticle->id))
+            ->take(4)
+            ->get();
+
+        $excludeIds = array_filter(array_merge(
+            [$featuredArticle?->id],
+            $latestArticles->pluck('id')->all()
+        ));
+
+        $moreStories = (clone $baseQuery)
+            ->whereNotIn('id', $excludeIds)
+            ->take(3)
+            ->get();
+
+        $categories = Category::select(['id', 'name', 'slug'])->get();
+
+        $categoryArticles = [];
+        foreach ($categories as $cat) {
+            $categoryArticles[$cat->id] = Article::with(['coverImage', 'user.role', 'category'])
+                ->where('category_id', $cat->id)
+                ->whereRaw('LOWER(status) = ?', ['published'])
+                ->where('is_archived', false)
+                ->latest('published_at')
+                ->take(3)
+                ->get();
+        }
+
+        // Helper closure to shape an article for the API
+        $shapeArticle = function (Article $article) {
+            $words = str_word_count(strip_tags($article->content ?? ''));
+            $readMinutes = max(1, (int) ceil($words / 200));
+            $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
+            $categoryName = $article->category->name ?? null;
+            $authorName = $article->user->full_name ?? null;
+            $authorUrl = $authorName ? route('public.author', $article->user_id) : null;
+
+            return [
+                'id' => $article->id,
+                'url' => route('public.article', $article->slug),
+                'imageUrl' => $imageUrl,
+                'title' => $article->title,
+                'category' => $categoryName,
+                'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : $article->created_at->format('M d, Y'),
+                'excerpt' => $article->excerpt,
+                'author' => $authorName,
+                'authorUrl' => $authorUrl,
+                'views' => $article->views,
+                'shares' => $article->shares,
+                'readMinutes' => $readMinutes,
+            ];
+        };
+
+        $props = [
+            'featuredArticle' => $featuredArticle ? $shapeArticle($featuredArticle) : null,
+            'latestArticles' => $latestArticles->map($shapeArticle)->values(),
+            'moreStories' => $moreStories->map($shapeArticle)->values(),
+            'categorySections' => $categories->map(function ($cat) use ($categoryArticles, $shapeArticle) {
+                $articles = $categoryArticles[$cat->id] ?? collect();
+                return (object) [
+                    'id' => $cat->id,
+                    'name' => $cat->name,
+                    'slug' => $cat->slug,
+                    'articles' => $articles->map($shapeArticle)->values(),
+                ];
+            })->values(),
+        ];
+
+        return response()->json([
+            'props' => $props,
+            'shared' => new \stdClass(),
+        ]);
+    }
+
+    /**
+     * JSON API endpoint for article archives with filters.
+     * Mirrors the query logic prepared in archives() but returns a JSON payload.
+     */
+    public function apiArchives(Request $request): JsonResponse
+    {
+        $categoryParam = (string) $request->query('category', 'All');
+        $queryParam = trim((string) $request->query('q', ''));
+        $sortBy = (string) $request->query('sort', 'newest');
+        $dateType = (string) $request->query('dateType', 'any');
+        $dateValue = (string) $request->query('dateValue', '');
+
+        $articlesQuery = Article::with(['coverImage', 'user.role', 'category'])
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false);
+
+        if ($categoryParam !== 'All' && !empty($categoryParam)) {
+            $articlesQuery->whereHas('category', function ($q) use ($categoryParam) {
+                $q->where('name', $categoryParam)
+                  ->orWhere('slug', $categoryParam);
+            });
+        }
+
+        if ($queryParam !== '') {
+            $lower = strtolower($queryParam);
+            $articlesQuery->where(function ($q) use ($lower) {
+                $q->whereRaw('LOWER(title) LIKE ?', ["%{$lower}%"])
+                  ->orWhereRaw('LOWER(excerpt) LIKE ?', ["%{$lower}%"])
+                  ->orWhereRaw('LOWER(content) LIKE ?', ["%{$lower}%"])
+                  ->orWhereHas('user', fn ($u) => $u->whereRaw('LOWER(full_name) LIKE ?', ["%{$lower}%"]));
+            });
+        }
+
+        if ($dateType === 'today') {
+            $articlesQuery->whereDate('published_at', now()->toDateString());
+        } elseif ($dateType === 'this_week') {
+            $articlesQuery->whereBetween('published_at', [now()->startOfWeek(), now()->endOfWeek()]);
+        } elseif ($dateType === 'choose' && !empty($dateValue)) {
+            $articlesQuery->whereDate('published_at', $dateValue);
+        }
+
+        match ($sortBy) {
+            'oldest' => $articlesQuery->oldest('published_at'),
+            'popular' => $articlesQuery->orderByDesc('views'),
+            'az' => $articlesQuery->orderBy('title', 'asc'),
+            default => $articlesQuery->latest('published_at'),
+        };
+
+        $articles = $articlesQuery->paginate(12)->withQueryString();
+        $categories = Category::select(['id', 'name', 'slug'])->get();
+
+        $shapeArticle = function (Article $article) {
+            $words = str_word_count(strip_tags($article->content ?? ''));
+            $readMinutes = max(1, (int) ceil($words / 200));
+            $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
+            $categoryName = $article->category->name ?? null;
+            $authorName = $article->user->full_name ?? null;
+            $authorUrl = $authorName ? route('public.author', $article->user_id) : null;
+
+            return [
+                'id' => $article->id,
+                'url' => route('public.article', $article->slug),
+                'imageUrl' => $imageUrl,
+                'title' => $article->title,
+                'category' => $categoryName,
+                'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : $article->created_at->format('M d, Y'),
+                'excerpt' => $article->excerpt,
+                'author' => $authorName,
+                'authorUrl' => $authorUrl,
+                'views' => $article->views,
+                'shares' => $article->shares,
+                'readMinutes' => $readMinutes,
+            ];
+        };
+
+        $pagination = $articles->linkCollection()->map(function ($link) {
+            $url = null;
+            if ($link['url']) {
+                $parsed = parse_url($link['url']);
+                $url = '/archives' . (!empty($parsed['query']) ? '?' . $parsed['query'] : '');
+            }
+            return [
+                'url' => $url,
+                'label' => $link['label'],
+                'active' => $link['active'],
+            ];
+        })->values();
+
+        $props = [
+            'articles' => $articles->map($shapeArticle)->values(),
+            'pagination' => $pagination,
+            'categories' => $categories,
+            'filters' => [
+                'query' => $queryParam,
+                'category' => $categoryParam,
+                'sort' => $sortBy,
+                'dateType' => $dateType,
+                'dateValue' => $dateValue,
+            ],
+            'total' => $articles->total(),
+        ];
+
+        return response()->json([
+            'props' => $props,
+            'shared' => new \stdClass(),
+        ]);
+    }
+
+    /**
      * Display articles within a specific category or latest releases.
      */
     public function category(string $category_slug): View
