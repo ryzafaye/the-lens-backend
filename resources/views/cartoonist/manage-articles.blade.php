@@ -136,7 +136,7 @@
             
             <div class="viewer-byline-row">
                 <div class="viewer-author-avatar">
-                    <img id="viewer-author-avatar-img" src="{{ Auth::user()->avatar ? asset('storage/' . Auth::user()->avatar) : (Auth::user()->profile_picture_url ? asset(Auth::user()->profile_picture_url) : asset('images/member-placeholder.svg')) }}" alt="Author avatar">
+                    <img id="viewer-author-avatar-img" src="{{ Auth::user()->avatar_url }}" alt="Author avatar">
                 </div>
                 <div class="viewer-byline-text">
                     <span class="viewer-by">By <strong id="viewer-author">{{ Auth::user()->full_name }}</strong></span>

@@ -243,42 +243,32 @@
             <input type="hidden" id="edit-article-id">
 
             <div class="form-field">
-                <label for="edit-title-input">Article Title</label>
-                <input type="text" id="edit-title-input" class="form-input" required>
-            </div>
-
-            <div class="form-row-2">
-                <div class="form-field">
-                    <label for="edit-category-select">Category</label>
-                    <select id="edit-category-select" class="form-select">
-                        <option value="News">News</option>
-                        <option value="Features">Features</option>
-                        <option value="Opinion">Opinion</option>
-                        <option value="Science and Technology">Science and Technology</option>
-                        <option value="Literature">Literature</option>
-                    </select>
-                </div>
-                <div class="form-field">
-                    <label>Estimated Read Time (Auto-calculated)</label>
-                    <div id="edit-readtime-display" class="form-readtime-badge" title="Automatically calculated from word count">
-                        <i class="fa-regular fa-clock"></i>
-                        <span id="edit-readtime-text">2 min read</span>
-                    </div>
-                </div>
+                <label for="edit-title-input">Article Title / Headline <span class="required-star">*</span></label>
+                <input type="text" id="edit-title-input" class="form-input" placeholder="Article headline..." required>
             </div>
 
             <div class="form-field">
-                <label for="edit-excerpt-input">Excerpt / Brief Summary</label>
+                <label for="edit-category-select">Category <span class="required-star">*</span></label>
+                <select id="edit-category-select" class="form-select">
+                    <option value="News">News</option>
+                    <option value="Feature">Feature</option>
+                    <option value="Opinion">Opinion</option>
+                    <option value="Science & Technology">Science & Technology</option>
+                    <option value="Literature">Literature</option>
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label for="edit-excerpt-input">Excerpt / Brief Summary <span class="required-star">*</span></label>
                 <textarea id="edit-excerpt-input" class="form-textarea" rows="3" placeholder="Brief summary of the article..." required></textarea>
             </div>
 
             <div class="form-field">
-                <label for="edit-body-input">Article Body / Content</label>
-                <textarea id="edit-body-input" class="form-textarea edit-body-textarea" rows="8" placeholder="Full article body content..." required></textarea>
+                <label for="edit-body-input">Article Body / Manuscript Content <span class="required-star">*</span></label>
+                <textarea id="edit-body-input" class="form-textarea edit-body-textarea" rows="10" placeholder="Full article body content..." required></textarea>
             </div>
 
-            <div class="modal-footer">
-                <button type="button" id="cancel-edit-btn" class="modal-btn modal-btn-cancel">Cancel</button>
+            <div class="modal-footer edit-modal-footer">
                 <button type="submit" class="modal-btn modal-btn-confirm-primary">
                     <i class="fa-solid fa-check"></i> Save Changes
                 </button>

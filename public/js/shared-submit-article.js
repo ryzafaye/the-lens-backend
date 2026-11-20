@@ -527,21 +527,19 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/\s*(style|class|id|dir|lang|face|size|color)=\S+/gi, '')
             .replace(/&lt;[^&>]+&gt;/gi, '');
 
-        // 3. Check if content has HTML markup
-        const hasHtmlTags = /<\/?(?:div|p|b|i|u|strong|em|h[1-6]|ul|ol|li|blockquote|br|a)[^>]*>/i.test(content);
-        if (!hasHtmlTags) {
-            const paras = content.split(/\r?\n\r?\n+/).map(p => p.trim()).filter(Boolean);
-            if (paras.length === 0) return '';
-            return paras.map(p => `<div>${p}</div>`).join('<div><br></div>');
-        }
-
-        // Convert <p> to <div> for Notion-style editor
+        // 3. Strip block HTML tags and normalize to clean paragraphs separated by double newline
         content = content
-            .replace(/<\/p>\s*<p[^>]*>/gi, '</div><div><br></div><div>')
-            .replace(/<p[^>]*>/gi, '<div>')
-            .replace(/<\/p>/gi, '</div>');
+            .replace(/<(?:div|p)[^>]*>\s*<br\s*\/?>\s*<\/(?:div|p)>/gi, '\n')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(?:div|p|h[1-6]|li|blockquote)>\s*<(?:div|p|h[1-6]|li|blockquote)[^>]*>/gi, '\n\n')
+            .replace(/<\/(?:div|p|h[1-6]|li|blockquote)>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&lt;\/?(?:div|p|br)[^&gt;]*&gt;/gi, '')
+            .replace(/<\/?(?:div|p|br)[^>]*>/gi, '')
+            .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+            .replace(/\n{3,}/g, '\n\n');
 
-        return content;
+        return content.trim();
     }
 
     function handleEditorPaste(e) {

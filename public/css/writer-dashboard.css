@@ -100,12 +100,19 @@
     justify-content: space-between;
     box-shadow: 0 1px 3px rgba(92, 10, 24, 0.05);
     transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+    cursor: pointer;
+    user-select: none;
 }
 
 .writer-stat-card:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 16px -2px rgba(92, 10, 24, 0.12);
     border-color: var(--sidebar-maroon-hover, #480612);
+}
+
+.writer-stat-card:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(92, 10, 24, 0.08);
 }
 
 .stat-number {
@@ -558,14 +565,41 @@
     color: #667085;
 }
 
-.manuscript-text-content {
-    font-size: 1rem;
-    line-height: 1.8;
-    color: #344054;
+.manuscript-text-content,
+.viewer-content-text {
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif) !important;
+    font-size: 1.05rem !important;
+    line-height: 1.75 !important;
+    color: #1f2937 !important;
+    word-break: break-word !important;
+    text-align: justify !important;
+    text-justify: inter-word !important;
 }
 
-.manuscript-text-content div {
-    margin-bottom: 14px;
+.manuscript-text-content *,
+.manuscript-text-content p,
+.manuscript-text-content div,
+.viewer-content-text *,
+.viewer-content-text p,
+.viewer-content-text div,
+.viewer-paragraph {
+    margin: 0 !important;
+    margin-block-start: 0 !important;
+    margin-block-end: 0 !important;
+    padding: 0 !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+    color: inherit !important;
+    text-align: justify !important;
+    text-justify: inter-word !important;
+}
+
+.manuscript-text-content div,
+.manuscript-text-content p,
+.viewer-content-text div,
+.viewer-content-text p {
+    min-height: 1.75em !important;
 }
 
 .remarks-alert-box {
@@ -1288,6 +1322,12 @@
 .writer-top-performing-column .ranked-stats {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
     color: #667085;
+}
+
+.writer-top-performing-column .stat-metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }

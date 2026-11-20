@@ -235,7 +235,25 @@
 .viewer-content-text *,
 .viewer-content-text p,
 .viewer-content-text div,
-.viewer-paragraph {
+.viewer-paragraph,
+.manuscript-text-content *,
+.manuscript-text-content p,
+.manuscript-text-content div,
+.manuscript-prose *,
+.manuscript-prose p,
+.manuscript-prose div,
+#modal-body *,
+#modal-body p,
+#modal-body div,
+#dash-modal-body *,
+#dash-modal-body p,
+#dash-modal-body div,
+#dash-body *,
+#dash-body p,
+#dash-body div,
+#reader-body *,
+#reader-body p,
+#reader-body div {
     margin: 0 !important;
     margin-block-start: 0 !important;
     margin-block-end: 0 !important;
@@ -249,8 +267,20 @@
 }
 
 .viewer-content-text div,
-.viewer-content-text p {
-    min-height: 1.75em;
+.viewer-content-text p,
+.manuscript-text-content div,
+.manuscript-text-content p,
+.manuscript-prose div,
+.manuscript-prose p,
+#modal-body div,
+#modal-body p,
+#dash-modal-body div,
+#dash-modal-body p,
+#dash-body div,
+#dash-body p,
+#reader-body div,
+#reader-body p {
+    min-height: 1.75em !important;
 }
 
 .viewer-content-text h1,
@@ -516,4 +546,95 @@
     border-color: #fecdca !important;
     color: #912018 !important;
     transform: translateY(-1px) !important;
+}
+
+.article-card-body {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 16px !important;
+    width: 100% !important;
+}
+
+.article-card-body-content {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+}
+
+.article-card-actions {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 8px !important;
+    flex-shrink: 0 !important;
+}
+
+@media (max-width: 576px) {
+    .article-card-body {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 10px !important;
+    }
+    .article-card-actions {
+        width: 100% !important;
+        justify-content: flex-end !important;
+    }
+}
+
+#btn-edit-from-remarks,
+.btn-edit-revise-now {
+    background-color: #700f2b !important;
+    border-color: #700f2b !important;
+    color: #ffffff !important;
+    transition: background-color 0.18s ease, transform 0.12s ease;
+}
+
+#btn-edit-from-remarks:hover,
+.btn-edit-revise-now:hover {
+    background-color: #580c22 !important;
+    border-color: #580c22 !important;
+    color: #ffffff !important;
+}
+
+/* ============================================================================
+   REMARKS MODAL (Unified Editorial Feedback Modal)
+   ============================================================================ */
+.remarks-modal-card {
+    max-width: 560px !important;
+    width: 100% !important;
+    background-color: #ffffff !important;
+    border-radius: 14px !important;
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.18) !important;
+    overflow: hidden !important;
+    margin: 16px;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.remarks-modal-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: 18px 24px !important;
+    border-bottom: 1px solid #eaecf0 !important;
+    background: #fafbfc !important;
+    flex-shrink: 0;
+}
+
+.remarks-modal-body {
+    padding: 24px !important;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.remarks-modal-footer {
+    margin-top: 24px !important;
+    display: flex !important;
+    justify-content: flex-end !important;
+    align-items: center !important;
+    gap: 10px !important;
 }

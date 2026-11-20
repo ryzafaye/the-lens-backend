@@ -24,23 +24,23 @@
         </div>
     </div>
 
-    <section class="writer-analytics-grid animate-fade-in delay-2">
-        <div class="writer-stat-card">
+    <section class="writer-analytics-grid animate-fade-in delay-2" aria-label="Writer statistics">
+        <a href="{{ route('writer.manage-my-articles', ['tab' => 'published', 'sort' => 'popular']) }}" class="writer-stat-card" style="text-decoration: none; color: inherit;" title="View published articles sorted by views">
             <div class="stat-number">{{ number_format($writerStats['total_views'] ?? 0) }}</div>
             <div class="stat-label">Total Views</div>
-        </div>
-        <div class="writer-stat-card">
+        </a>
+        <a href="{{ route('writer.manage-my-articles', ['tab' => 'published']) }}" class="writer-stat-card" style="text-decoration: none; color: inherit;" title="View published articles">
             <div class="stat-number">{{ number_format($writerStats['published'] ?? 0) }}</div>
             <div class="stat-label">Published Articles</div>
-        </div>
-        <div class="writer-stat-card">
-            <div class="stat-number">{{ number_format($writerStats['pending'] ?? 0) }}</div>
-            <div class="stat-label">Pending Revision</div>
-        </div>
-        <div class="writer-stat-card">
+        </a>
+        <a href="{{ route('writer.manage-my-articles', ['tab' => 'pending']) }}" class="writer-stat-card" style="text-decoration: none; color: inherit;" title="View articles pending review">
+            <div class="stat-number">{{ number_format($writerStats['pending_review'] ?? $writerStats['pending'] ?? 0) }}</div>
+            <div class="stat-label">Pending Review</div>
+        </a>
+        <a href="{{ route('writer.manage-my-articles', ['tab' => 'drafts']) }}" class="writer-stat-card" style="text-decoration: none; color: inherit;" title="View drafts">
             <div class="stat-number">{{ number_format($writerStats['drafts'] ?? 0) }}</div>
             <div class="stat-label">Drafts</div>
-        </div>
+        </a>
     </section>
 
     <div class="writer-dashboard-content-grid animate-fade-in delay-3">
@@ -85,6 +85,7 @@
                             'category' => $categoryName,
                             'date' => $formattedDate,
                             'author' => Auth::user()->full_name,
+                            'author_avatar' => Auth::user()->avatar_url,
                             'excerpt' => $art->excerpt ?? $art['excerpt'],
                             'content' => $art->content ?? $art['content'],
                             'status' => $status,
@@ -109,17 +110,19 @@
                             </div>
                         </div>
                         <div class="article-card-body">
-                            <h3 class="article-card-title">{{ $art->title ?? $art['title'] }}</h3>
-                            <p class="article-card-excerpt">{{ $art->excerpt ?? $art['excerpt'] }}</p>
-                        </div>
-                        @if($canEdit)
-                            <div class="article-card-footer">
-                                <a href="{{ route('writer.submit-article', ['draft_id' => $art->id ?? $art['id']]) }}" class="btn-box-edit" onclick="event.stopPropagation()">
-                                    <i class="fa-solid fa-pen-to-square"></i>
-                                    <span>Edit</span>
-                                </a>
+                            <div class="article-card-body-content">
+                                <h3 class="article-card-title">{{ $art->title ?? $art['title'] }}</h3>
+                                <p class="article-card-excerpt">{{ $art->excerpt ?? $art['excerpt'] }}</p>
                             </div>
-                        @endif
+                            @if($canEdit)
+                                <div class="article-card-actions">
+                                    <a href="{{ route('writer.submit-article', ['draft_id' => $art->id ?? $art['id']]) }}" class="btn-box-edit" onclick="event.stopPropagation()">
+                                        <i class="fa-solid fa-pen-to-square"></i>
+                                        <span>Edit</span>
+                                    </a>
+                                </div>
+                            @endif
+                        </div>
                     </article>
                 @empty
                     <div class="writer-empty-state">
@@ -147,10 +150,12 @@
                                 'category' => $categoryName,
                                 'date' => $topArt->created_at ? $topArt->created_at->format('M d, Y') : '',
                                 'author' => Auth::user()->full_name,
+                                'author_avatar' => Auth::user()->avatar_url,
                                 'excerpt' => $topArt->excerpt,
                                 'content' => $topArt->content,
                                 'status' => $topArt->status,
                                 'views' => $topArt->views ?? 0,
+                                'shares' => $topArt->shares ?? 0,
                             ];
                         @endphp
                         <div class="ranked-item" data-action="view" data-article="{{ json_encode($modalData) }}">
@@ -167,6 +172,7 @@
                                     </span>
                                     <span class="ranked-stats">
                                         <span class="stat-metric" title="Views"><i class="fa-regular fa-eye"></i> {{ number_format($topArt->views ?? 0) }}</span>
+                                        <span class="stat-metric" title="Shares"><i class="fa-solid fa-share-nodes"></i> {{ number_format($topArt->shares ?? 0) }}</span>
                                     </span>
                                 </div>
                             </div>
@@ -197,7 +203,7 @@
         <div class="viewer-modal-body">
             <h1 id="viewer-title" class="viewer-title">Title</h1>
             <div class="viewer-byline-row">
-                <div class="viewer-author-avatar"><img src="{{ asset('images/member-placeholder.svg') }}"></div>
+                <div class="viewer-author-avatar"><img id="viewer-author-avatar-img" src="{{ Auth::user()->avatar_url }}" alt="Author avatar"></div>
                 <div class="viewer-byline-text"><span class="viewer-by">By <strong id="viewer-author">Author</strong></span></div>
             </div>
             <div id="viewer-content" class="viewer-content-text"></div>

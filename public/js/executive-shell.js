@@ -278,13 +278,13 @@ try {
                             <div class="logout-modal-icon-badge">
                                 <i class="fa-solid fa-right-from-bracket"></i>
                             </div>
-                            <h2 id="lens-logout-title" class="logout-modal-title">Are you sure you want to log out?</h2>
+                            <h2 id="lens-logout-title" class="logout-modal-title">Are you sure to logout?</h2>
                         </div>
                         <div class="logout-modal-actions">
                             <button type="button" id="lens-logout-cancel-btn" class="logout-btn-cancel">Cancel</button>
                             <button type="button" id="lens-logout-confirm-btn" class="logout-btn-confirm">
                                 <i class="fa-solid fa-right-from-bracket"></i>
-                                <span>Log Out</span>
+                                <span>Confirm</span>
                             </button>
                         </div>
                     </div>

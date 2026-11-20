@@ -33,7 +33,9 @@ class User extends Authenticatable
         'email',
         'password',
         'profile_picture_url',
+        'profile_picture_public_id',
         'avatar',
+        'avatar_url',
         'account_status',
     ];
 
@@ -95,6 +97,25 @@ class User extends Authenticatable
         $this->attributes['profile_picture_url'] = $value;
     }
 
+    public function setAvatarUrlAttribute($value)
+    {
+        $this->attributes['profile_picture_url'] = $value;
+    }
+
+    /**
+     * Optimizes Cloudinary image URLs with automatic format, quality, and sizing.
+     */
+    public static function optimizeCloudinaryUrl(?string $url, string $transformation = 'w_300,c_limit,f_auto,q_auto'): ?string
+    {
+        if (!$url || !str_contains($url, 'res.cloudinary.com') || !str_contains($url, '/upload/')) {
+            return $url;
+        }
+        if (str_contains($url, 'f_auto') || str_contains($url, 'q_auto')) {
+            return $url;
+        }
+        return str_replace('/upload/', '/upload/' . $transformation . '/', $url);
+    }
+
     public function getAvatarUrlAttribute()
     {
         $url = $this->profile_picture_url;
@@ -102,7 +123,7 @@ class User extends Authenticatable
             return asset('images/member-placeholder.svg');
         }
         if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
-            return $url;
+            return static::optimizeCloudinaryUrl($url, 'w_300,c_limit,f_auto,q_auto');
         }
         if (str_starts_with($url, 'storage/')) {
             return asset($url);

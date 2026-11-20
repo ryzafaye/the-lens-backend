@@ -37,6 +37,68 @@
         .shimmer-button::after { content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent); transition: 0.5s; }
         .shimmer-button:hover::after { animation: shimmer 1.1s infinite; }
         input::-ms-reveal, input::-ms-clear { display: none; }
+
+        /* Page Curl / Flipped Page (Bottom-Left Corner) */
+        .page-curl-wrapper {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 110px;
+            height: 110px;
+            z-index: 30;
+            pointer-events: auto;
+            cursor: pointer;
+            user-select: none;
+            display: block;
+        }
+
+        @media (min-width: 640px) {
+            .page-curl-wrapper {
+                width: 145px;
+                height: 145px;
+            }
+        }
+
+        @media (min-width: 1024px) {
+            .page-curl-wrapper {
+                width: 192px;
+                height: 192px;
+            }
+        }
+
+        .page-curl-svg {
+            width: 100%;
+            height: 100%;
+            transform-origin: bottom left;
+            transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), filter 0.4s ease;
+            filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+        }
+
+        @keyframes pageCurlBreath {
+            0%, 100% {
+                transform: scale(1) translate(0, 0) rotate(0deg);
+            }
+            50% {
+                transform: scale(1.03) translate(2.5px, -2.5px) rotate(-1deg);
+            }
+        }
+
+        .page-curl-wrapper .page-curl-svg {
+            animation: pageCurlBreath 5.5s ease-in-out infinite;
+        }
+
+        .page-curl-wrapper:hover .page-curl-svg,
+        .page-curl-wrapper:focus-visible .page-curl-svg {
+            animation: none;
+            transform: scale(1.07) translate(5px, -5px) rotate(-1.8deg);
+            filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.65));
+        }
+
+        .page-curl-wrapper:active .page-curl-svg {
+            animation: none;
+            transform: scale(1.12) translate(8px, -8px) rotate(-3deg);
+            filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.75));
+        }
     </style>
 </head>
 <body class="min-h-full bg-white font-body text-stone-900 selection:bg-wine selection:text-white flex items-center justify-center p-4 sm:p-8 md:p-12 lg:p-16 relative overflow-x-hidden">
@@ -69,9 +131,9 @@
                     </div>
                 </div>
                 
-                <!-- Page Curl SVG Animation (Restored to bottom-left corner) -->
-                <div class="hidden lg:block group/curl absolute bottom-0 left-0 lg:w-48 lg:h-48 z-30 pointer-events-auto cursor-pointer select-none" title="Turn page">
-                    <svg class="w-full h-full transition-transform duration-500 ease-out group-hover/curl:-rotate-1 group-hover/curl:scale-[1.03] group-hover/curl:translate-x-1 group-hover/curl:-translate-y-1 origin-bottom-left filter drop-shadow-md" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- Page Curl / Flipped Page (Bottom-left corner) -->
+                <div class="page-curl-wrapper" title="The Lens — Turn page" role="button" tabindex="0" aria-label="Turn page decorative fold">
+                    <svg class="page-curl-svg" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <defs>
                             <!-- Soft Diffusion Filter for Under-Roll Shadow -->
                             <filter id="softRollShadow" x="-30%" y="-30%" width="160%" height="160%">

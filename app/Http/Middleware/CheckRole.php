@@ -18,16 +18,25 @@ class CheckRole
         /** @var \App\Models\User $user */
         $user = Auth::user();
         // Eager load role relationship if not already loaded
-        $user?->loadMissing('role');
+        if (!$user->relationLoaded('role') || $user->role === null) {
+            $user->load('role');
+        }
 
         // Retrieve the authenticated user's role
-        $userRole = $user->role->role_name ?? '';
-        $userRoleLower = strtolower(trim($userRole));
-        $rolesLower = array_map(fn($r) => strtolower(trim($r)), $roles);
+        $userRole = $user->role->role_name ?? ($user->role_name ?? (is_string($user->role) ? $user->role : ''));
+        $userRoleLower = strtolower(trim((string)$userRole));
+        $rolesLower = array_map(fn($r) => strtolower(trim((string)$r)), $roles);
 
         // If the user's role is in the authorized roles list, allow the request
         if (in_array($userRole, $roles) || in_array($userRoleLower, $rolesLower)) {
             return $next($request);
+        }
+
+        // Broad check for Writer roles (Writer, Staff Writer, News Writer, etc.)
+        if (in_array('Writer', $roles) || in_array('writer', $rolesLower)) {
+            if (str_contains($userRoleLower, 'writer')) {
+                return $next($request);
+            }
         }
 
         // Allow any Chief / EIC role if Editor-in-Chief or Associate Editor-in-Chief is among authorized roles

@@ -74,8 +74,8 @@
             </label>
             <div class="sort-select-wrapper">
                 <select id="writer-sort-select" class="review-sort-select" aria-label="Sort articles">
-                    <option value="newest" selected>Newest First</option>
-                    <option value="oldest">Oldest First</option>
+                    <option value="newest" selected>Newest</option>
+                    <option value="oldest">Oldest</option>
                     <option value="popular">Most Viewed</option>
                     <option value="az">A–Z</option>
                 </select>
@@ -197,9 +197,9 @@
                 <p id="remarks-modal-content" class="remarks-alert-text"></p>
             </div>
             <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
-                <button type="button" id="btn-edit-from-remarks" class="btn-primary-action" style="height: 36px; padding: 0 14px;">
+                <button type="button" id="btn-edit-from-remarks" class="btn-primary-action btn-edit-revise-now" style="height: 36px; padding: 0 16px; background: #700f2b !important; color: #ffffff !important; border-color: #700f2b !important;">
                     <i class="fa-solid fa-pen-to-square"></i>
-                    <span>Edit Manuscript</span>
+                    <span>Edit and Revise Now</span>
                 </button>
             </div>
         </div>

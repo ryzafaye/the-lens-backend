@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
                      'Executive User';
 
     // =========================================================================
-    // 2. ESCAPE HTML HELPER
+    // 2. ESCAPE HTML HELPER & STATEMENT GRAMMAR FORMATTER
     // =========================================================================
     function escapeHTML(str) {
         if (!str) return '';
@@ -37,6 +37,132 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function formatActivityStatement(item) {
+        if (!item) return { causer: 'System', beforeSubject: 'performed an action', subjectName: '', afterSubject: '', fullSentence: 'System performed an action' };
+        const causer = (item.causer || item.user || 'System').trim();
+        let rawType = item.subjectType || item.subject?.type || 'Article';
+        let lowerType = String(rawType).trim().toLowerCase();
+        if (['record', 'desk record', 'editorial item', ''].includes(lowerType)) {
+            lowerType = 'article';
+        }
+        let typePhrase = `the ${lowerType}`;
+        if (['officer account', 'user account', 'user'].includes(lowerType)) {
+            typePhrase = 'the officer account';
+        } else if (['photo', 'photograph'].includes(lowerType)) {
+            typePhrase = 'the photo';
+        } else if (['media asset', 'graphic material', 'graphic'].includes(lowerType)) {
+            typePhrase = 'the media asset';
+        } else if (['editorial cartoon', 'cartoon'].includes(lowerType)) {
+            typePhrase = 'the editorial cartoon';
+        }
+
+        let rawSubjectName = item.subjectName || item.target || item.title || '';
+        let cleanSubjectName = String(rawSubjectName).trim();
+        if (['record', 'desk record', 'untitled article', 'editorial item'].includes(cleanSubjectName.toLowerCase())) {
+            cleanSubjectName = '';
+        }
+
+        let beforeSubject = '';
+        let afterSubject = '';
+
+        let hasCleanStatementBefore = false;
+        if (item.statementBefore !== undefined && item.statementBefore !== null && item.statementBefore !== '') {
+            const rawBefore = String(item.statementBefore).trim();
+            const beforeLower = rawBefore.toLowerCase();
+            const isMalformed =
+                beforeLower.includes('edited manuscript') ||
+                beforeLower.includes('returned for revision the') ||
+                beforeLower.includes('the article the article') ||
+                rawBefore.includes('the Article') ||
+                rawBefore.includes('the Editorial Item') ||
+                rawBefore.includes('the Desk Record');
+
+            if (!isMalformed) {
+                beforeSubject = rawBefore;
+                afterSubject = item.statementAfter || '';
+                hasCleanStatementBefore = true;
+            }
+        }
+
+        if (!hasCleanStatementBefore) {
+            const actionRaw = String(item.action || '').trim();
+            const actionLower = actionRaw.toLowerCase();
+
+            if (actionLower === 'edited manuscript' || actionLower === 'edited article' || actionLower === 'updated manuscript') {
+                beforeSubject = `edited the manuscript for ${typePhrase}`;
+            } else if (actionLower === 'returned for revision' || actionLower === 'returned article for revision' || actionLower === 'returned for revisions') {
+                beforeSubject = `returned ${typePhrase}`;
+                afterSubject = 'for revision';
+            } else if (actionLower.startsWith('returned') && actionLower.includes('revision')) {
+                let noun = typePhrase;
+                if (actionLower.includes('cartoon')) noun = 'the editorial cartoon';
+                else if (actionLower.includes('photo')) noun = 'the photo';
+                else if (actionLower.includes('visual')) noun = 'the visual asset';
+                beforeSubject = `returned ${noun}`;
+                afterSubject = 'for revision';
+            } else if (actionLower.startsWith('endorsed') && (actionLower.includes('eic') || actionLower.includes('editor-in-chief'))) {
+                let noun = typePhrase;
+                if (actionLower.includes('cartoon')) noun = 'the editorial cartoon';
+                else if (actionLower.includes('photo')) noun = 'the photo';
+                else if (actionLower.includes('visual')) noun = 'the visual asset';
+                beforeSubject = `endorsed ${noun}`;
+                afterSubject = 'to the EIC';
+            } else if (actionLower === 'assigned cover to') {
+                beforeSubject = `assigned a cover to ${typePhrase}`;
+            } else if (actionLower === 'created account for' || actionLower === 'created user') {
+                beforeSubject = 'created an officer account for';
+            } else if (actionLower === 'updated role for') {
+                beforeSubject = 'updated the role for';
+            } else if (actionLower === 'deactivated account for') {
+                beforeSubject = 'deactivated the account for';
+            } else if (actionLower === 'activated account for') {
+                beforeSubject = 'activated the account for';
+            } else if (actionLower === 'approved visual artwork') {
+                beforeSubject = 'approved the visual artwork';
+            } else if (actionLower === 'submitted editorial cartoon') {
+                beforeSubject = 'submitted the editorial cartoon';
+            } else if (actionLower === 'submitted photo') {
+                beforeSubject = 'submitted the photo';
+            } else if (actionLower === 'submitted media' || actionLower === 'submitted illustration') {
+                beforeSubject = `submitted ${typePhrase}`;
+            } else if (['emergency delete', 'emergency deleted', 'hard delete', 'hard deleted', 'permanently delete', 'permanently deleted'].includes(actionLower)) {
+                beforeSubject = `permanently deleted ${typePhrase}`;
+            } else if (['deleted', 'deleted article'].includes(actionLower)) {
+                beforeSubject = `deleted ${typePhrase}`;
+            } else if (['rejected', 'declined', 'rejected article', 'declined article'].includes(actionLower)) {
+                beforeSubject = `rejected ${typePhrase}`;
+            } else if (['submitted', 'submitted article'].includes(actionLower)) {
+                beforeSubject = `submitted ${typePhrase}`;
+            } else if (['approved', 'approved article'].includes(actionLower)) {
+                beforeSubject = `approved ${typePhrase}`;
+            } else if (['published', 'published article'].includes(actionLower)) {
+                beforeSubject = `published ${typePhrase}`;
+            } else if (['unpublished', 'unpublished article'].includes(actionLower)) {
+                beforeSubject = `unpublished ${typePhrase}`;
+            } else if (['archived', 'archived article'].includes(actionLower)) {
+                beforeSubject = `archived ${typePhrase}`;
+            } else if (['restored', 'restored article'].includes(actionLower)) {
+                beforeSubject = `restored ${typePhrase}`;
+            } else if (['submitted', 'approved', 'published', 'unpublished', 'archived', 'restored'].includes(actionLower)) {
+                beforeSubject = `${actionLower} ${typePhrase}`;
+            } else {
+                beforeSubject = `${actionRaw} ${typePhrase}`;
+            }
+        }
+
+        const nameQuote = cleanSubjectName ? ` "${cleanSubjectName}"` : '';
+        const afterPart = afterSubject ? ` ${afterSubject}` : '';
+        const fullSentence = `${causer} ${beforeSubject}${nameQuote}${afterPart}`;
+
+        return {
+            causer,
+            beforeSubject,
+            subjectName: cleanSubjectName,
+            afterSubject,
+            fullSentence
+        };
     }
 
     // =========================================================================
@@ -108,7 +234,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Search query matching causer, action, subject, or role
             if (query) {
-                const fullSentence = `${item.causer} ${item.action} the ${item.subjectType} "${item.subjectName}" ${item.timestampText} ${item.causerRole}`.toLowerCase();
+                const stmt = formatActivityStatement(item);
+                const fullSentence = `${stmt.fullSentence} ${item.timestampText} ${item.causerRole}`.toLowerCase();
                 return fullSentence.includes(query);
             }
 
@@ -158,6 +285,10 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
 
             items.forEach(item => {
+                const stmt = formatActivityStatement(item);
+                const subjectSpan = stmt.subjectName ? ` <span class="subject-name-token" style="font-family: 'Playfair Display', Georgia, serif !important; margin: 0 4px;">"${escapeHTML(stmt.subjectName)}"</span>` : '';
+                const afterSpan = stmt.afterSubject ? ` <span${stmt.subjectName ? '' : ' style="margin-left: 4px;"'}>${escapeHTML(stmt.afterSubject)}</span>` : '';
+
                 html += `
                     <div class="activity-event-card">
                         <div class="activity-event-node"></div>
@@ -169,7 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             <div class="activity-content-col">
                                 <p class="activity-sentence-statement">
-                                    <strong class="causer-name-token">${escapeHTML(item.causer)}</strong> ${escapeHTML(item.action)} the ${escapeHTML(item.subjectType)} <span class="subject-name-token">"${escapeHTML(item.subjectName)}"</span> <span class="timestamp-token">${escapeHTML(item.timestampText)}.</span>
+                                    <strong class="causer-name-token">${escapeHTML(stmt.causer)}</strong> <span>${escapeHTML(stmt.beforeSubject)}</span>${subjectSpan}${afterSpan} <span class="timestamp-token" style="margin-left: 4px;">${escapeHTML(item.timestampText)}.</span>
                                 </p>
 
                                 <div class="activity-subrow">

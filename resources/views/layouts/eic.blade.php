@@ -69,18 +69,8 @@
                 </div>
             </div>
 
-            <!-- Right Side: Notification + Profile -->
+            <!-- Right Side: User Profile -->
             <div class="topbar-right">
-                <button type="button" class="topbar-notification-btn" aria-label="View notifications">
-                    <span class="notification-icon-wrapper">
-                        <i class="fa-regular fa-bell"></i>
-                        <span class="notification-badge-dot"></span>
-                    </span>
-                    <span class="notification-label">Notification</span>
-                </button>
-
-                <div class="topbar-divider"></div>
-
                 <!-- User Profile Lockup -->
                 <div class="topbar-user-profile">
                     <div class="topbar-avatar-circle" title="User Profile">
@@ -136,10 +126,6 @@
                 <a href="{{ route('eic.activity-logs') }}" class="mobile-nav-link {{ request()->routeIs('eic.activity-logs*') ? 'active' : '' }}">
                     <i class="fa-solid fa-clock-rotate-left"></i>
                     <span>Activity log</span>
-                </a>
-                <a href="{{ route('eic.transparency') }}" class="mobile-nav-link {{ request()->routeIs('eic.transparency*') ? 'active' : '' }}">
-                    <i class="fa-solid fa-file-invoice-dollar"></i>
-                    <span>Transparency</span>
                 </a>
                 <a href="{{ route('eic.feedback-inbox') }}" class="mobile-nav-link {{ request()->routeIs('eic.feedback-inbox*') ? 'active' : '' }}">
                     <i class="fa-regular fa-comments"></i>

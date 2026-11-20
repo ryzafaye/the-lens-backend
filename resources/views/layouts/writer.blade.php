@@ -63,14 +63,6 @@
             </div>
 
             <div class="topbar-right">
-                <button type="button" class="topbar-notification-btn">
-                    <span class="notification-icon-wrapper">
-                        <i class="fa-regular fa-bell"></i>
-                        <span class="notification-badge-dot"></span>
-                    </span>
-                    <span class="notification-label">Notification</span>
-                </button>
-                <div class="topbar-divider"></div>
                 <div class="topbar-user-profile">
                     <div class="topbar-avatar-circle">
                         <img src="{{ Auth::user()?->avatar_url ?? (Auth::user()?->avatar ? asset(Auth::user()->avatar) : asset('images/member-placeholder.svg')) }}" alt="User">

@@ -51,7 +51,7 @@ class ExecutiveController extends Controller
      */
     protected function authorizePresidentOrVp(Request $request)
     {
-        if ($request->is('executive*')) {
+        if ($request->is('executive*') || $request->is('api/executive*')) {
             $user = Auth::user();
             $user?->loadMissing('role');
             $roleName = $user->role->role_name ?? '';
@@ -61,8 +61,24 @@ class ExecutiveController extends Controller
         }
     }
 
+    /**
+     * RBAC Enforcement: Only Auditor and Treasurer roles can access the Transparency module
+     */
+    protected function authorizeAuditorOrTreasurer(Request $request)
+    {
+        if ($request->is('executive*') || $request->is('api/executive*')) {
+            $user = Auth::user();
+            $user?->loadMissing('role');
+            $roleName = $user->role->role_name ?? '';
+            if (!in_array($roleName, ['Auditor', 'Treasurer'])) {
+                abort(403, 'Access Denied: Only Auditor and Treasurer roles have permission to access the Transparency portal.');
+            }
+        }
+    }
+
     public function dashboard()
     {
+        $request = request();
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
@@ -155,15 +171,47 @@ class ExecutiveController extends Controller
             ->map(fn($log) => $log->formatForTimeline())
             ->values();
 
+        $topJournalists = Cache::remember('exec_dashboard_top_journalists', 60, function () {
+            return Article::where('status', 'Published')
+                ->selectRaw('user_id, COUNT(*) as article_count')
+                ->groupBy('user_id')
+                ->orderByDesc('article_count')
+                ->take(5)
+                ->with('user.role')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => $row->user_id,
+                        'name' => $row->user->full_name ?? 'Author',
+                        'role' => $row->user->role->role_name ?? 'Writer',
+                        'article_count' => (int) $row->article_count,
+                        'count' => (int) $row->article_count,
+                        'avatar' => $row->user->profile_picture_url ?? '/images/member-placeholder.svg',
+                    ];
+                });
+        });
+
         $dashboardData = [
             'metrics' => $metrics,
             'pendingArticles' => $pendingArticles,
             'articles' => $publishedArticles,
             'category' => $category?->name,
             'recentActivities' => $recentActivities,
+            'topJournalists' => $topJournalists,
         ];
 
-        return view('executive.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'category', 'dashboardData', 'recentActivities'));
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json([
+                'metrics' => $metrics,
+                'pendingArticles' => $pendingArticles,
+                'publishedArticles' => $publishedArticles,
+                'category' => $category?->name,
+                'recentActivities' => $recentActivities,
+                'topJournalists' => $topJournalists,
+            ]);
+        }
+
+        return view('executive.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'category', 'dashboardData', 'recentActivities', 'topJournalists'));
     }
 
     public function manageArticles(Request $request)
@@ -203,7 +251,7 @@ class ExecutiveController extends Controller
                 });
         });
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json($articles);
         }
 
@@ -254,10 +302,10 @@ class ExecutiveController extends Controller
             $article->slug = \Illuminate\Support\Str::slug((string) $request->input('title'));
         }
         if ($request->has('excerpt')) {
-            $article->excerpt = (string) $request->input('excerpt');
+            $article->excerpt = Article::cleanArticleBodyText((string) $request->input('excerpt'));
         }
         if ($request->has('content') || $request->has('body')) {
-            $article->content = (string) ($request->input('content') ?? $request->input('body'));
+            $article->content = Article::cleanArticleBodyText((string) ($request->input('content') ?? $request->input('body')));
         }
         if ($request->filled('category')) {
             $cat = Category::where('name', $request->input('category'))
@@ -335,6 +383,15 @@ class ExecutiveController extends Controller
         });
 
         $category = null; // President and Vice President review across all publication sections
+
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json([
+                'pendingArticles' => $pendingArticles,
+                'category' => $category,
+                'sort' => $sort,
+                'categoryHeads' => $categoryHeads,
+            ]);
+        }
 
         return view('executive.review-articles', compact('pendingArticles', 'category', 'sort', 'categoryHeads'));
     }
@@ -419,21 +476,30 @@ class ExecutiveController extends Controller
             'remarks' => 'required|string',
         ]);
 
-        $article = Article::findOrFail($id);
+        $article = Article::with('category')->findOrFail($id);
+        $catName = $article->category->name ?? '';
+        $isOpinion = stripos($catName, 'opinion') !== false;
+
+        $targetStatus = $isOpinion ? 'For Writer Revision' : 'For Head Revision';
+        $message = $isOpinion
+            ? 'Opinion article returned to author for writer revision.'
+            : "Article returned to {$catName} Head for head revision.";
+
         $article->update([
-            'status' => 'For Revision',
+            'status' => $targetStatus,
             'remarks' => $request->remarks,
         ]);
 
         ActivityLog::logAction(Auth::id(), 'returned for revision', $article);
 
+        Article::clearArticleCaches($article);
         $this->clearSubmissionCaches($article->category_id);
 
         if ($request->wantsJson() || $request->ajax()) {
-            return response()->json(['success' => true, 'message' => 'Article returned to author with revision remarks.']);
+            return response()->json(['success' => true, 'message' => $message]);
         }
 
-        return redirect()->back()->with('warning', 'Article returned to author with revision remarks.');
+        return redirect()->back()->with('warning', $message);
     }
 
     /**
@@ -547,6 +613,7 @@ class ExecutiveController extends Controller
 
     public function activityLogs()
     {
+        $request = request();
         $activities = ActivityLog::with(['user.role', 'entity'])
             ->latest()
             ->take(100)
@@ -554,11 +621,19 @@ class ExecutiveController extends Controller
             ->map(fn($log) => $log->formatForTimeline())
             ->values();
 
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['activities' => $activities]);
+        }
+
         return view('executive.activity-logs', compact('activities'));
     }
 
-    public function transparency()
+    public function transparency(Request $request)
     {
+        $this->authorizeAuditorOrTreasurer($request);
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['status' => 'ok']);
+        }
         return view('executive.transparency');
     }
 
@@ -566,11 +641,18 @@ class ExecutiveController extends Controller
     {
         $this->authorizePresidentOrVp($request);
         $feedbacks = [];
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['feedbacks' => $feedbacks]);
+        }
         return view('executive.feedback-inbox', compact('feedbacks'));
     }
 
     public function profileSettings()
     {
+        $request = request();
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['user' => Auth::user()?->load('role')]);
+        }
         return view('executive.profile-settings');
     }
 
@@ -592,11 +674,20 @@ class ExecutiveController extends Controller
                 ->find($request->draft_id);
         }
 
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json([
+                'categories' => $categories,
+                'drafts' => $drafts,
+                'editingDraft' => $editingDraft,
+            ]);
+        }
+
         return view('executive.submit-article', compact('categories', 'drafts', 'editingDraft'));
     }
 
     public function manageMyArticles()
     {
+        $request = request();
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
@@ -621,6 +712,10 @@ class ExecutiveController extends Controller
                     'author' => $user->full_name ?? ($article->user->full_name ?? 'Staff Writer'),
                 ];
             });
+
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['articles' => $articles]);
+        }
 
         return view('executive.manage-my-articles', compact('articles'));
     }
@@ -678,6 +773,14 @@ class ExecutiveController extends Controller
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
                     }
 
+                    if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+                        return response()->json([
+                            'success' => true,
+                            'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted successfully.',
+                            'article' => $article,
+                        ]);
+                    }
+
                     if ($targetStatus === 'Draft') {
                         return redirect()->route(request()->is('section-head*') ? 'section-head.submit-article' : 'executive.submit-article', ['tab' => 'drafts'])
                             ->with('success', 'Draft saved successfully.');
@@ -708,6 +811,14 @@ class ExecutiveController extends Controller
 
             $this->clearSubmissionCaches($request->category_id);
 
+            if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted successfully.',
+                    'article' => $createdArticle,
+                ]);
+            }
+
             if ($targetStatus === 'Draft') {
                 return redirect()->route(request()->is('section-head*') ? 'section-head.submit-article' : 'executive.submit-article', ['tab' => 'drafts'])
                     ->with('success', 'Draft saved successfully.');
@@ -721,6 +832,9 @@ class ExecutiveController extends Controller
                 ->with('success', 'Article submitted successfully.');
 
         } catch (\Exception $e) {
+            if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+                return response()->json(['success' => false, 'message' => 'Database Error: ' . $e->getMessage()], 422);
+            }
             return back()->withErrors(['system_error' => 'Database Error: ' . $e->getMessage()])->withInput();
         }
     }
@@ -762,7 +876,7 @@ class ExecutiveController extends Controller
 
         $draft->delete();
 
-        if (request()->wantsJson()) {
+        if (request()->wantsJson() || request()->ajax() || request()->is('api/*')) {
             return response()->json(['success' => true, 'message' => 'Draft deleted successfully.']);
         }
 
@@ -771,18 +885,7 @@ class ExecutiveController extends Controller
 
     protected function sanitizeArticleContent($content)
     {
-        if (!$content) return '';
-
-        $decoded = html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        while (($nextDecoded = html_entity_decode($decoded, ENT_QUOTES | ENT_HTML5, 'UTF-8')) !== $decoded) {
-            $decoded = $nextDecoded;
-        }
-
-        $sanitized = preg_replace('/<\/?span[^>]*>/i', '', $decoded);
-        $sanitized = preg_replace('/\s*style\s*=\s*("[^"]*"|\'[^\']*\')/i', '', $sanitized);
-        $sanitized = preg_replace('/\s*class\s*=\s*("[^"]*"|\'[^\']*\')/i', '', $sanitized);
-
-        return trim($sanitized);
+        return Article::cleanArticleBodyText($content);
     }
 
     public function manageAccounts(Request $request)
@@ -833,6 +936,9 @@ class ExecutiveController extends Controller
         if (!$request->filled('full_name') && $request->filled('name')) {
             $request->merge(['full_name' => $request->input('name')]);
         }
+        if ($request->filled('student_number')) {
+            $request->merge(['student_number' => strtoupper(trim((string) $request->input('student_number')))]);
+        }
 
         $roleId = $request->input('role_id');
         if (!$roleId && $request->filled('role')) {
@@ -845,16 +951,28 @@ class ExecutiveController extends Controller
         $request->merge(['role_id' => $roleId]);
 
         $validated = $request->validate([
-            'student_number' => 'required|string|max:50|unique:users,student_number',
+            'student_number' => [
+                'required',
+                'string',
+                'regex:/^\d{4}-\d{5}-BN-0$/',
+                'unique:users,student_number',
+            ],
             'full_name' => 'required|string|max:255',
             'role_id' => 'required|exists:roles,id',
+        ], [
+            'student_number.required' => 'Student number is required.',
+            'student_number.regex' => 'The student number format must be YEAR-5DIGIT-BN-0 (e.g. 2024-00010-BN-0).',
+            'student_number.unique' => 'This student number is already registered to another account.',
+            'full_name.required' => 'Full name is required.',
+            'role_id.required' => 'Please select a valid role.',
+            'role_id.exists' => 'The selected role is invalid.',
         ]);
 
         $officer = User::create([
             'student_number' => $validated['student_number'],
             'full_name' => $validated['full_name'],
             'role_id' => $validated['role_id'],
-            'password' => Hash::make('password123'),
+            'password' => Hash::make('thelenspupBN0'),
             'account_status' => 'active',
         ]);
 
@@ -877,15 +995,15 @@ class ExecutiveController extends Controller
             'status' => $officer->account_status ?? 'active',
         ];
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
-                'message' => 'Officer account created successfully.',
+                'message' => 'Officer account created successfully. Default password is thelenspupBN0.',
                 'officer' => $formatted,
             ]);
         }
 
-        return redirect()->back()->with('success', 'Officer account created successfully.');
+        return redirect()->back()->with('success', 'Officer account created successfully. Default password is thelenspupBN0.');
     }
 
     public function updateRole(Request $request, $id)
@@ -932,7 +1050,7 @@ class ExecutiveController extends Controller
             'status' => $officer->account_status ?? 'active',
         ];
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
                 'message' => "Role for {$officer->full_name} updated to {$officer->role->role_name}.",
@@ -993,7 +1111,7 @@ class ExecutiveController extends Controller
             'status' => $officer->account_status ?? 'active',
         ];
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
                 'message' => "Officer account {$statusLabel}.",

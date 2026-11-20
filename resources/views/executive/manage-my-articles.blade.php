@@ -85,8 +85,8 @@
             </label>
             <div class="sort-select-wrapper">
                 <select id="executive-sort-select" class="review-sort-select" aria-label="Sort articles">
-                    <option value="newest" selected>Newest First</option>
-                    <option value="oldest">Oldest First</option>
+                    <option value="newest" selected>Newest</option>
+                    <option value="oldest">Oldest</option>
                     <option value="popular">Most Viewed</option>
                     <option value="az">A–Z</option>
                 </select>

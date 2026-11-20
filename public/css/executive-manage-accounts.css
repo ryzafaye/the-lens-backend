@@ -151,14 +151,14 @@
     pointer-events: none;
 }
 
-/* Primary "+ Add Officer" Action Button */
+/* Primary "+ Add Officer" Action Button (Maroon) */
 .btn-add-officer {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    background-color: var(--sidebar-maroon, #5c0a18);
-    color: #ffffff;
-    border: 1px solid transparent;
+    background-color: var(--sidebar-maroon, #5c0a18) !important;
+    color: #ffffff !important;
+    border: 1px solid var(--sidebar-maroon, #5c0a18) !important;
     padding: 8.5px 16px;
     border-radius: 8px;
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
@@ -171,13 +171,20 @@
 }
 
 .btn-add-officer:hover {
-    background-color: #450712;
+    background-color: var(--sidebar-maroon-hover, #430711) !important;
+    border-color: var(--sidebar-maroon-hover, #430711) !important;
+    color: #ffffff !important;
     transform: translateY(-1px);
-    box-shadow: 0 3px 8px rgba(92, 10, 24, 0.2);
+    box-shadow: 0 4px 12px rgba(92, 10, 24, 0.28) !important;
+}
+
+.btn-add-officer:active {
+    transform: translateY(0);
 }
 
 .btn-add-officer i {
     font-size: 0.80rem;
+    color: #ffffff !important;
 }
 
 /* Accounts Summary Stat Counter */
@@ -390,36 +397,49 @@
     flex-shrink: 0;
 }
 
-/* Edit Role Button (Subtle Neutral Button with Maroon Hover) */
+/* Edit Role Button (Solid Maroon with Dark Maroon Hover) */
 .btn-account-edit-role {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background-color: #ffffff;
-    border: 1px solid #d0d5dd;
-    color: #344054;
+    background-color: var(--sidebar-maroon, #5c0a18) !important;
+    border: 1px solid var(--sidebar-maroon, #5c0a18) !important;
+    color: #ffffff !important;
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
     font-size: 0.78rem;
     font-weight: 600;
     padding: 7px 13px;
     border-radius: 7px;
     cursor: pointer;
+    box-shadow: 0 1px 2px rgba(92, 10, 24, 0.12);
     transition: all 0.15s ease;
     white-space: nowrap;
 }
 
 .btn-account-edit-role:hover {
-    background-color: #f9fafb;
-    border-color: var(--sidebar-maroon, #5c0a18);
-    color: var(--sidebar-maroon, #5c0a18);
-    box-shadow: 0 1px 2px rgba(92, 10, 24, 0.08);
+    background-color: var(--sidebar-maroon-hover, #430711) !important;
+    border-color: var(--sidebar-maroon-hover, #430711) !important;
+    color: #ffffff !important;
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(92, 10, 24, 0.28) !important;
+}
+
+.btn-account-edit-role:active {
+    transform: translateY(0);
+}
+
+.btn-account-edit-role i {
+    font-size: 0.78rem;
+    color: #ffffff !important;
 }
 
 .account-box.deactivated .btn-account-edit-role {
-    opacity: 0.75;
+    background-color: #7a2231 !important;
+    border-color: #7a2231 !important;
+    opacity: 0.85;
 }
 
-/* Deactivate Button (Subtle Red Outline) */
+/* Deactivate Button (Subtle Red Outline with Tactile Hover) */
 .btn-account-deactivate {
     display: inline-flex;
     align-items: center;
@@ -441,9 +461,15 @@
     background-color: #fef3f2;
     border-color: #d92d20;
     color: #b42318;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(217, 45, 32, 0.15);
 }
 
-/* Activate Button (Clean Emerald Green) */
+.btn-account-deactivate:active {
+    transform: translateY(0);
+}
+
+/* Activate Button (Clean Emerald Green with Tactile Hover) */
 .btn-account-activate {
     display: inline-flex;
     align-items: center;
@@ -453,6 +479,25 @@
     color: #027a48;
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
     font-size: 0.78rem;
+    font-weight: 600;
+    padding: 7px 13px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.btn-account-activate:hover {
+    background-color: #d1fadf;
+    border-color: #32d583;
+    color: #05603a;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(18, 183, 106, 0.18);
+}
+
+.btn-account-activate:active {
+    transform: translateY(0);
+}
     font-weight: 600;
     padding: 7px 13px;
     border-radius: 7px;
@@ -532,15 +577,18 @@
     padding-bottom: 2px;
 }
 
-.btn-modal-submit-maroon {
+/* Full Width Maroon Create Account & Save Role Action Button */
+.btn-modal-submit-maroon,
+.btn-create-account,
+.btn-save-role {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 9px;
     width: 100%;
-    background-color: var(--sidebar-maroon, #5c0a18);
-    color: #ffffff;
-    border: 1px solid var(--sidebar-maroon, #5c0a18);
+    background-color: var(--sidebar-maroon, #5c0a18) !important;
+    color: #ffffff !important;
+    border: 1px solid var(--sidebar-maroon, #5c0a18) !important;
     padding: 12px 24px;
     border-radius: 8px;
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
@@ -551,15 +599,26 @@
     transition: all 0.18s ease;
 }
 
-.btn-modal-submit-maroon:hover {
-    background-color: var(--sidebar-maroon-hover, #430711);
-    border-color: var(--sidebar-maroon-hover, #430711);
+.btn-modal-submit-maroon:hover,
+.btn-create-account:hover,
+.btn-save-role:hover {
+    background-color: var(--sidebar-maroon-hover, #430711) !important;
+    border-color: var(--sidebar-maroon-hover, #430711) !important;
+    color: #ffffff !important;
     transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(92, 10, 24, 0.32);
+    box-shadow: 0 4px 14px rgba(92, 10, 24, 0.32) !important;
 }
 
-.btn-modal-submit-maroon:active {
+.btn-modal-submit-maroon:active,
+.btn-create-account:active,
+.btn-save-role:active {
     transform: translateY(0);
+}
+
+.btn-modal-submit-maroon i,
+.btn-create-account i,
+.btn-save-role i {
+    color: #ffffff !important;
 }
 
 /* Deactivation Confirmation Modal Footer & Submit Button (Cancel Removed) */
@@ -683,6 +742,54 @@
         flex: 1;
         justify-content: center;
         padding: 8px 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .accounts-header-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .accounts-page-title {
+        font-size: 1.45rem;
+    }
+
+    .accounts-stats-indicator {
+        flex-wrap: wrap;
+        gap: 6px;
+        font-size: 0.74rem;
+    }
+
+    .account-box {
+        padding: 12px 14px;
+    }
+
+    .officer-primary-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .officer-meta-row {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .account-actions-stack {
+        flex-direction: column;
+        width: 100%;
+        gap: 6px;
+    }
+
+    .account-actions-stack button {
+        width: 100%;
+    }
+
+    .modal-card {
+        max-width: calc(100vw - 24px) !important;
+        margin: 12px;
     }
 }
 

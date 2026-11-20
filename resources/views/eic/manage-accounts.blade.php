@@ -90,8 +90,11 @@
                     id="officer-input-student-id" 
                     name="student_number"
                     class="form-input" 
-                    placeholder="e.g. 2024-00123-BN-0" 
+                    placeholder="e.g. 2024-00010-BN-0" 
+                    maxlength="15"
+                    pattern="^\d{4}-\d{5}-BN-0$"
                     required>
+                <p style="color: #667085; font-size: 0.74rem; margin-top: 3px;">Format: YEAR-5DIGIT-BN-0 (e.g. 2024-00010-BN-0)</p>
             </div>
 
             <div class="form-field">
@@ -138,9 +141,17 @@
                 </select>
             </div>
 
+            <div class="form-field">
+                <label>Default Password</label>
+                <div class="default-password-box" style="display: flex; align-items: center; justify-content: space-between; background-color: #fafbfc; border: 1px solid #eaecf0; border-radius: 8px; padding: 9px 12px; font-size: 0.84rem;">
+                    <span style="font-family: monospace; font-weight: 700; color: #5c0a18; letter-spacing: 0.03em;">thelenspupBN0</span>
+                    <span style="font-size: 0.72rem; color: #667085;">Initial password (changeable later)</span>
+                </div>
+            </div>
+
             <!-- Footer with Maroon Designed Create Account Button -->
             <div class="modal-single-btn-footer">
-                <button type="submit" class="btn-modal-submit-maroon">
+                <button type="submit" class="btn-modal-submit-maroon btn-create-account">
                     <i class="fa-solid fa-user-plus"></i>
                     <span>Create Account</span>
                 </button>
@@ -250,7 +261,7 @@
             </div>
 
             <div class="modal-single-btn-footer">
-                <button type="submit" class="btn-modal-submit-maroon">
+                <button type="submit" class="btn-modal-submit-maroon btn-save-role">
                     <i class="fa-solid fa-check"></i>
                     <span>Save Role</span>
                 </button>

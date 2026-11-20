@@ -21,6 +21,24 @@ class ActivityLog extends Model
     ];
 
     /**
+     * The "booted" method of the model.
+     * Automatically filters out all login, logout, and profile settings events system-wide.
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope('exclude_auth_logs', function ($builder) {
+            $builder->where(function ($q) {
+                $q->whereRaw("LOWER(action) NOT LIKE '%login%'")
+                  ->whereRaw("LOWER(action) NOT LIKE '%logged in%'")
+                  ->whereRaw("LOWER(action) NOT LIKE '%logout%'")
+                  ->whereRaw("LOWER(action) NOT LIKE '%logged out%'")
+                  ->whereRaw("LOWER(action) NOT LIKE '%profile%'")
+                  ->whereRaw("LOWER(action) NOT LIKE '%password%'");
+            });
+        });
+    }
+
+    /**
      * Relationship: The user (causer) who performed the action.
      */
     public function user(): BelongsTo
@@ -47,6 +65,19 @@ class ActivityLog extends Model
      */
     public static function logAction($userId, string $action, ?Model $entity = null): self
     {
+        $actionLower = strtolower(trim($action));
+        if (
+            str_contains($actionLower, 'login') ||
+            str_contains($actionLower, 'logged in') ||
+            str_contains($actionLower, 'logout') ||
+            str_contains($actionLower, 'logged out') ||
+            str_contains($actionLower, 'profile') ||
+            str_contains($actionLower, 'password')
+        ) {
+            // Do not record login, logout, or profile settings events in activity logs
+            return new static();
+        }
+
         $entityType = $entity ? get_class($entity) : null;
         if ($entityType === 'App\\Models\\Cartoon') {
             $entityType = null;
@@ -76,7 +107,19 @@ class ActivityLog extends Model
 
         if ($entity instanceof Article) {
             $subjectName = $entity->title ?? 'Untitled Article';
-            $categoryName = strtolower($entity->category->name ?? '');
+            static $categoryMap = null;
+            if ($categoryMap === null) {
+                $categoryMap = \Illuminate\Support\Facades\Cache::remember('all_categories_map_id_name', 3600, function () {
+                    try {
+                        return \App\Models\Category::pluck('name', 'id')->all();
+                    } catch (\Throwable $e) {
+                        return [];
+                    }
+                });
+            }
+            $catId = $entity->category_id ?? null;
+            $catName = ($catId && isset($categoryMap[$catId])) ? $categoryMap[$catId] : ($entity->relationLoaded('category') ? ($entity->category->name ?? '') : '');
+            $categoryName = strtolower($catName);
             if (str_contains($categoryName, 'cartoon')) {
                 $subjectType = 'Editorial Cartoon';
             } elseif (str_contains($categoryName, 'media') || str_contains($categoryName, 'graphic') || str_contains($categoryName, 'pubmat')) {
@@ -97,6 +140,12 @@ class ActivityLog extends Model
             } elseif (stripos($this->action, 'media') !== false || stripos($this->action, 'pubmat') !== false) {
                 $subjectType = 'Media Asset';
                 $subjectName = 'Publication Material';
+            } elseif (stripos($this->action, 'login') !== false || stripos($this->action, 'logged in') !== false) {
+                $subjectType = 'Portal Session';
+                $subjectName = 'The Lens Workspace';
+            } elseif (stripos($this->action, 'profile') !== false || stripos($this->action, 'password') !== false) {
+                $subjectType = 'Account Security';
+                $subjectName = 'User Profile';
             } else {
                 $subjectType = 'Editorial Item';
                 $subjectName = 'Desk Record';
@@ -113,6 +162,8 @@ class ActivityLog extends Model
         $isYesterday = $createdAt->isYesterday();
         $dayGroup = $isToday ? 'Today' : ($isYesterday ? 'Yesterday' : $createdAt->format('M d, Y'));
 
+        $statementParts = static::formatStatementParts($displayAction, $subjectType, $subjectName);
+
         return [
             'id' => (string) $this->id,
             'causer' => $user?->full_name ?? 'System',
@@ -121,6 +172,9 @@ class ActivityLog extends Model
             'action' => $displayAction,
             'subjectType' => $subjectType,
             'subjectName' => $subjectName,
+            'statementBefore' => $statementParts['before_subject'],
+            'statementAfter' => $statementParts['after_subject'],
+            'statementSentence' => $statementParts['statement_sentence'],
             'timestampText' => $createdAt->diffForHumans(),
             'formattedDate' => $createdAt->format('M d, Y • g:i A'),
             'isoDate' => $createdAt->toIso8601String(),
@@ -130,6 +184,125 @@ class ActivityLog extends Model
             'avatar' => $user?->avatar_url ?? ($user?->avatar ? asset($user->avatar) : asset('images/member-placeholder.svg')),
             'target' => $subjectName,
             'time' => $createdAt->diffForHumans(),
+        ];
+    }
+
+    /**
+     * Format action, subject type, and subject name into grammatically correct sentence clauses.
+     *
+     * @param string $action
+     * @param string $subjectType
+     * @param string|null $subjectName
+     * @return array{before_subject: string, subject_name: string, after_subject: string, statement_sentence: string}
+     */
+    public static function formatStatementParts(string $action, string $subjectType, ?string $subjectName): array
+    {
+        $actionLower = strtolower(trim($action));
+        $lowerType = strtolower(trim($subjectType));
+        if (in_array($lowerType, ['record', 'desk record', 'editorial item', ''])) {
+            $lowerType = 'article';
+        }
+
+        $typePhrase = "the {$lowerType}";
+        if (in_array($lowerType, ['officer account', 'user account', 'user'])) {
+            $typePhrase = 'the officer account';
+        } elseif (in_array($lowerType, ['photo', 'photograph'])) {
+            $typePhrase = 'the photo';
+        } elseif (in_array($lowerType, ['media asset', 'graphic material', 'graphic'])) {
+            $typePhrase = 'the media asset';
+        } elseif (in_array($lowerType, ['editorial cartoon', 'cartoon'])) {
+            $typePhrase = 'the editorial cartoon';
+        }
+
+        $cleanSubjectName = trim($subjectName ?? '');
+        if (in_array(strtolower($cleanSubjectName), ['record', 'desk record', 'untitled article', 'editorial item'])) {
+            $cleanSubjectName = '';
+        }
+
+        $beforeSubject = '';
+        $afterSubject = '';
+
+        if ($actionLower === 'edited manuscript' || $actionLower === 'edited article') {
+            $beforeSubject = "edited the manuscript for {$typePhrase}";
+        } elseif ($actionLower === 'returned for revision' || $actionLower === 'returned article for revision') {
+            $beforeSubject = "returned {$typePhrase}";
+            $afterSubject = 'for revision';
+        } elseif (str_starts_with($actionLower, 'returned') && str_contains($actionLower, 'revision')) {
+            $noun = $typePhrase;
+            if (str_contains($actionLower, 'cartoon')) {
+                $noun = 'the editorial cartoon';
+            } elseif (str_contains($actionLower, 'photo')) {
+                $noun = 'the photo';
+            } elseif (str_contains($actionLower, 'visual')) {
+                $noun = 'the visual asset';
+            }
+            $beforeSubject = "returned {$noun}";
+            $afterSubject = 'for revision';
+        } elseif (str_starts_with($actionLower, 'endorsed') && str_contains($actionLower, 'eic')) {
+            $noun = $typePhrase;
+            if (str_contains($actionLower, 'cartoon')) {
+                $noun = 'the editorial cartoon';
+            } elseif (str_contains($actionLower, 'photo')) {
+                $noun = 'the photo';
+            } elseif (str_contains($actionLower, 'visual')) {
+                $noun = 'the visual asset';
+            }
+            $beforeSubject = "endorsed {$noun}";
+            $afterSubject = 'to the EIC';
+        } elseif ($actionLower === 'assigned cover to') {
+            $beforeSubject = "assigned a cover to {$typePhrase}";
+        } elseif (in_array($actionLower, ['created account for', 'created user'])) {
+            $beforeSubject = 'created an officer account for';
+        } elseif ($actionLower === 'updated role for') {
+            $beforeSubject = 'updated the role for';
+        } elseif ($actionLower === 'deactivated account for') {
+            $beforeSubject = 'deactivated the account for';
+        } elseif ($actionLower === 'activated account for') {
+            $beforeSubject = 'activated the account for';
+        } elseif ($actionLower === 'approved visual artwork') {
+            $beforeSubject = 'approved the visual artwork';
+        } elseif ($actionLower === 'submitted editorial cartoon') {
+            $beforeSubject = 'submitted the editorial cartoon';
+        } elseif ($actionLower === 'submitted photo') {
+            $beforeSubject = 'submitted the photo';
+        } elseif (in_array($actionLower, ['submitted media', 'submitted illustration'])) {
+            $beforeSubject = "submitted {$typePhrase}";
+        } elseif (in_array($actionLower, ['emergency delete', 'emergency deleted', 'hard delete', 'hard deleted', 'permanently delete', 'permanently deleted'])) {
+            $beforeSubject = "permanently deleted {$typePhrase}";
+        } elseif (in_array($actionLower, ['deleted', 'deleted article'])) {
+            $beforeSubject = "deleted {$typePhrase}";
+        } elseif (in_array($actionLower, ['rejected', 'declined', 'rejected article', 'declined article'])) {
+            $beforeSubject = "rejected {$typePhrase}";
+        } elseif (in_array($actionLower, ['submitted', 'submitted article'])) {
+            $beforeSubject = "submitted {$typePhrase}";
+        } elseif (in_array($actionLower, ['approved', 'approved article'])) {
+            $beforeSubject = "approved {$typePhrase}";
+        } elseif (in_array($actionLower, ['published', 'published article'])) {
+            $beforeSubject = "published {$typePhrase}";
+        } elseif (in_array($actionLower, ['unpublished', 'unpublished article'])) {
+            $beforeSubject = "unpublished {$typePhrase}";
+        } elseif (in_array($actionLower, ['archived', 'archived article'])) {
+            $beforeSubject = "archived {$typePhrase}";
+        } elseif (in_array($actionLower, ['restored', 'restored article'])) {
+            $beforeSubject = "restored {$typePhrase}";
+        } elseif (in_array($actionLower, ['submitted', 'approved', 'published', 'unpublished', 'archived', 'restored'])) {
+            $beforeSubject = "{$actionLower} {$typePhrase}";
+        } else {
+            if (str_ends_with($actionLower, ' for') || str_ends_with($actionLower, ' to') || str_ends_with($actionLower, ' of')) {
+                $beforeSubject = "{$action} {$typePhrase}";
+            } else {
+                $beforeSubject = "{$action} {$typePhrase}";
+            }
+        }
+
+        $nameQuote = $cleanSubjectName !== '' ? " \"{$cleanSubjectName}\"" : '';
+        $afterText = $afterSubject !== '' ? " {$afterSubject}" : '';
+
+        return [
+            'before_subject' => $beforeSubject,
+            'subject_name' => $cleanSubjectName,
+            'after_subject' => $afterSubject,
+            'statement_sentence' => trim("{$beforeSubject}{$nameQuote}{$afterText}"),
         ];
     }
 }

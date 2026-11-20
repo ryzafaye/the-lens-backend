@@ -87,14 +87,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasHtmlTags = /<\/?(?:div|p|br|h[1-6]|blockquote|ul|ol|li|strong|b|em|i|u|s|a|hr)[^>]*>/i.test(content);
 
         if (hasHtmlTags) {
-            // Convert <p> tags to <div> with canonical <div><br></div> paragraph separators
+            // Standardize <p> to <div> without injecting artificial extra blank line breaks
             content = content
-                .replace(/<\/p>\s*<p[^>]*>/gi, '</div><div><br></div><div>')
                 .replace(/<p[^>]*>/gi, '<div>')
                 .replace(/<\/p>/gi, '</div>');
 
-            // Collapse multiple consecutive blank line divs into a single standard break
-            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){2,}/gi, '<div><br></div>');
+            // Collapse excessive consecutive blank lines (3 or more) to a single break
+            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){3,}/gi, '<div><br></div>');
 
             // Remove leading and trailing empty lines
             content = content
@@ -104,17 +103,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return content;
         }
 
-        // 6. Plain-text fallback: split into paragraphs and map to canonical block elements
-        const paragraphs = content
-            .split(/\r?\n\r?\n+/)
-            .map(p => p.trim())
-            .filter(p => p.length > 0);
-
-        if (paragraphs.length === 0) {
-            return '<p style="color: #98a2b3; font-style: italic;">No content available for this manuscript.</p>';
-        }
-
-        return paragraphs.map(p => `<div>${escapeHTML(p).replace(/\r?\n/g, '<br>')}</div>`).join('<div><br></div>');
+        // 6. Plain-text fallback: preserve exact line and paragraph spacing (cursor height)
+        const lines = content.split(/\r?\n/);
+        return lines.map(line => {
+            const trimmed = line.trim();
+            return trimmed ? `<div>${escapeHTML(trimmed)}</div>` : '<div><br></div>';
+        }).join('');
     }
 
     const toastContainer = document.getElementById('toast-container');
@@ -279,22 +273,112 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Fallback to default
             }
 
+            function formatActivityStatement(item) {
+                if (!item) return { causer: 'System', beforeSubject: 'performed an action', subjectName: '', afterSubject: '' };
+                const causer = (item.user || item.causer || 'System').trim();
+                let rawType = item.subjectType || 'Article';
+                let lowerType = String(rawType).trim().toLowerCase();
+                if (['record', 'desk record', 'editorial item', ''].includes(lowerType)) {
+                    lowerType = 'article';
+                }
+                let typePhrase = `the ${lowerType}`;
+                if (['officer account', 'user account', 'user'].includes(lowerType)) {
+                    typePhrase = 'the officer account';
+                } else if (['photo', 'photograph'].includes(lowerType)) {
+                    typePhrase = 'the photo';
+                } else if (['media asset', 'graphic material', 'graphic'].includes(lowerType)) {
+                    typePhrase = 'the media asset';
+                } else if (['editorial cartoon', 'cartoon'].includes(lowerType)) {
+                    typePhrase = 'the editorial cartoon';
+                }
+
+                let rawSubjectName = item.target || item.subjectName || '';
+                let cleanSubjectName = String(rawSubjectName).trim();
+                if (['record', 'desk record', 'untitled article', 'editorial item'].includes(cleanSubjectName.toLowerCase())) {
+                    cleanSubjectName = '';
+                }
+
+                const actionRaw = String(item.action || '').trim();
+                const actionLower = actionRaw.toLowerCase();
+                let beforeSubject = '';
+                let afterSubject = '';
+
+                if (actionLower === 'edited manuscript' || actionLower === 'edited article') {
+                    beforeSubject = `edited the manuscript for ${typePhrase}`;
+                } else if (actionLower === 'returned for revision' || actionLower === 'returned article for revision') {
+                    beforeSubject = `returned ${typePhrase}`;
+                    afterSubject = 'for revision';
+                } else if (actionLower.startsWith('returned') && actionLower.includes('revision')) {
+                    let noun = typePhrase;
+                    if (actionLower.includes('cartoon')) noun = 'the editorial cartoon';
+                    else if (actionLower.includes('photo')) noun = 'the photo';
+                    else if (actionLower.includes('visual')) noun = 'the visual asset';
+                    beforeSubject = `returned ${noun}`;
+                    afterSubject = 'for revision';
+                } else if (actionLower.startsWith('endorsed') && actionLower.includes('eic')) {
+                    let noun = typePhrase;
+                    if (actionLower.includes('cartoon')) noun = 'the editorial cartoon';
+                    else if (actionLower.includes('photo')) noun = 'the photo';
+                    else if (actionLower.includes('visual')) noun = 'the visual asset';
+                    beforeSubject = `endorsed ${noun}`;
+                    afterSubject = 'to the EIC';
+                } else if (actionLower === 'assigned cover to') {
+                    beforeSubject = `assigned a cover to ${typePhrase}`;
+                } else if (actionLower === 'created account for' || actionLower === 'created user') {
+                    beforeSubject = 'created an officer account for';
+                } else if (actionLower === 'updated role for') {
+                    beforeSubject = 'updated the role for';
+                } else if (actionLower === 'deactivated account for') {
+                    beforeSubject = 'deactivated the account for';
+                } else if (actionLower === 'activated account for') {
+                    beforeSubject = 'activated the account for';
+                } else if (actionLower === 'approved visual artwork') {
+                    beforeSubject = 'approved the visual artwork';
+                } else if (actionLower === 'submitted editorial cartoon') {
+                    beforeSubject = 'submitted the editorial cartoon';
+                } else if (actionLower === 'submitted photo') {
+                    beforeSubject = 'submitted the photo';
+                } else if (actionLower === 'submitted media' || actionLower === 'submitted illustration') {
+                    beforeSubject = `submitted ${typePhrase}`;
+                } else if (['submitted', 'approved', 'published', 'unpublished', 'archived', 'restored'].includes(actionLower)) {
+                    beforeSubject = `${actionLower} ${typePhrase}`;
+                } else if (item.statementBefore) {
+                    beforeSubject = item.statementBefore;
+                    afterSubject = item.statementAfter || '';
+                } else {
+                    beforeSubject = `${actionRaw} ${typePhrase}`;
+                }
+
+                return {
+                    causer,
+                    beforeSubject,
+                    subjectName: cleanSubjectName,
+                    afterSubject
+                };
+            }
+
             if (logsToDisplay.length === 0) {
                 activityContainer.innerHTML = '<p class="text-sm text-gray-500 py-6 text-center">No recent activities.</p>';
             } else {
-                activityContainer.innerHTML = logsToDisplay.map(item => `
+                activityContainer.innerHTML = logsToDisplay.map(item => {
+                    const stmt = formatActivityStatement(item);
+                    const subjectSpan = stmt.subjectName ? ` <em style="font-family: 'Playfair Display', Georgia, serif !important; font-style: normal; font-weight: 600; color: #101828; margin: 0 4px;">"${escapeHTML(stmt.subjectName)}"</em>` : '';
+                    const afterSpan = stmt.afterSubject ? ` <span${stmt.subjectName ? '' : ' style="margin-left: 4px;"'}>${escapeHTML(stmt.afterSubject)}</span>` : '';
+
+                    return `
                     <div class="activity-item" onclick="window.location.href='/mpc/activity-logs'" style="cursor: pointer;" title="Open Activity Log">
                         <div class="activity-avatar">
-                            <img src="${item.avatar}" alt="${escapeHTML(item.user)}">
+                            <img src="${item.avatar}" alt="${escapeHTML(stmt.causer)}">
                         </div>
                         <div class="activity-details">
                             <p class="activity-text">
-                                <strong>${escapeHTML(item.user)}</strong> ${escapeHTML(item.action)} the ${escapeHTML(item.subjectType || 'Article')} <em>"${escapeHTML(item.target)}"</em> <span style="color:#667085; font-size:0.75rem; margin-left:3px;">${escapeHTML(item.time)}.</span>
+                                <strong>${escapeHTML(stmt.causer)}</strong> <span>${escapeHTML(stmt.beforeSubject)}</span>${subjectSpan}${afterSpan} <span style="color:#667085; font-size:0.75rem; margin-left:4px;">${escapeHTML(item.time)}.</span>
                             </p>
                             <span class="activity-time">${escapeHTML(item.time)}</span>
                         </div>
                     </div>
-                `).join('');
+                `;
+                }).join('');
             }
         }
 
@@ -382,7 +466,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const authorCounts = {};
         activeArticles.forEach(a => {
-            if (a.author) {
+            if (a.status === 'Published' && a.author) {
                 authorCounts[a.author] = (authorCounts[a.author] || 0) + 1;
             }
         });

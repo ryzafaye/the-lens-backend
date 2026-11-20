@@ -412,9 +412,6 @@ class MediaController extends Controller
      */
     private function sanitizeArticleContent(?string $content): string
     {
-        if (!$content) {
-            return '';
-        }
-        return strip_tags($content, '<p><br><b><strong><i><em><u><s><h2><h3><blockquote><ul><ol><li><a><hr>');
+        return Article::cleanArticleBodyText($content);
     }
 }

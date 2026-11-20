@@ -76,7 +76,7 @@
                 <span>Activity log</span>
             </a>
 
-            @if(!request()->is('section-head*'))
+            @if(!request()->is('section-head*') && in_array(Auth::user()?->role?->role_name, ['Auditor', 'Treasurer']))
                 <a href="{{ route('executive.transparency') }}" class="sidebar-nav-item {{ request()->is('executive/transparency*') || request()->routeIs('executive.transparency*') ? 'active' : '' }}">
                     <i class="fa-solid fa-file-invoice-dollar"></i>
                     <span>Transparency</span>

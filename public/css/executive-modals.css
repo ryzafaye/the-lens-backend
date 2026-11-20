@@ -211,7 +211,13 @@
     object-fit: cover;
 }
 
-.viewer-content-text {
+.viewer-content-text,
+.manuscript-text-content,
+.manuscript-prose,
+#modal-body,
+#dash-modal-body,
+#dash-body,
+#reader-body {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif) !important;
     font-size: 1.05rem !important;
     line-height: 1.75 !important;
@@ -227,7 +233,25 @@
 .viewer-content-text *,
 .viewer-content-text p,
 .viewer-content-text div,
-.viewer-paragraph {
+.viewer-paragraph,
+.manuscript-text-content *,
+.manuscript-text-content p,
+.manuscript-text-content div,
+.manuscript-prose *,
+.manuscript-prose p,
+.manuscript-prose div,
+#modal-body *,
+#modal-body p,
+#modal-body div,
+#dash-modal-body *,
+#dash-modal-body p,
+#dash-modal-body div,
+#dash-body *,
+#dash-body p,
+#dash-body div,
+#reader-body *,
+#reader-body p,
+#reader-body div {
     margin: 0 !important;
     margin-block-start: 0 !important;
     margin-block-end: 0 !important;
@@ -241,8 +265,20 @@
 }
 
 .viewer-content-text div,
-.viewer-content-text p {
-    min-height: 1.75em;
+.viewer-content-text p,
+.manuscript-text-content div,
+.manuscript-text-content p,
+.manuscript-prose div,
+.manuscript-prose p,
+#modal-body div,
+#modal-body p,
+#dash-modal-body div,
+#dash-modal-body p,
+#dash-body div,
+#dash-body p,
+#reader-body div,
+#reader-body p {
+    min-height: 1.75em !important;
 }
 
 .viewer-content-text h1,
@@ -597,7 +633,8 @@
     box-shadow: 0 0 0 3px rgba(247, 144, 9, 0.25);
 }
 
-.toast-message.danger .toast-bullet-dot {
+.toast-message.danger .toast-bullet-dot,
+.toast-message.error .toast-bullet-dot {
     background-color: #f04438;
     box-shadow: 0 0 0 3px rgba(240, 68, 56, 0.25);
 }

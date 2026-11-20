@@ -228,14 +228,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // Sync new avatar URL if returned
-                if (data.user && data.user.avatar_url) {
-                    updateAllAvatars(data.user.avatar_url);
+                const freshAvatar = (data.user && data.user.avatar_url) || data.profile_picture_url || (data.user && data.user.profile_picture_url);
+                if (freshAvatar) {
+                    updateAllAvatars(freshAvatar);
                     try {
-                        localStorage.setItem('userAvatar', data.user.avatar_url);
-                        localStorage.setItem('cartoonistAvatar', data.user.avatar_url);
-                        localStorage.setItem('mpcAvatar', data.user.avatar_url);
+                        localStorage.setItem('userAvatar', freshAvatar);
+                        localStorage.setItem('cartoonistAvatar', freshAvatar);
+                        localStorage.setItem('mpcAvatar', freshAvatar);
                     } catch (storageErr) {}
                 }
+
+                // Dispatch global event for instant updates across layouts/components without page refresh
+                try {
+                    window.dispatchEvent(new CustomEvent('profile-updated', {
+                        detail: {
+                            full_name: data.user ? data.user.full_name : null,
+                            avatar_url: freshAvatar || null,
+                            student_number: data.user ? data.user.student_number : null,
+                        }
+                    }));
+                } catch (e) {}
 
                 // Reset file input and removal state
                 if (avatarFileInput) avatarFileInput.value = '';

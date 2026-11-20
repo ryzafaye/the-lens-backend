@@ -66,11 +66,6 @@
                 <span>Activity log</span>
             </a>
 
-            <a href="{{ route('eic.transparency') }}" class="sidebar-nav-item {{ request()->routeIs('eic.transparency*') ? 'active active-manual' : '' }}" data-page="eic-transparency.html">
-                <i class="fa-solid fa-file-invoice-dollar"></i>
-                <span>Transparency</span>
-            </a>
-
             <a href="{{ route('eic.feedback-inbox') }}" class="sidebar-nav-item {{ request()->routeIs('eic.feedback-inbox*') ? 'active active-manual' : '' }}" data-page="eic-feedback-inbox.html">
                 <i class="fa-regular fa-comments"></i>
                 <span>Feedback</span>

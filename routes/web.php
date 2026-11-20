@@ -34,6 +34,10 @@ Route::controller(PublicController::class)->group(function () {
     Route::get('/literature', fn () => redirect()->route('public.category', ['category_slug' => 'literature']));
 });
 
+Route::get('/sanctum/csrf-cookie', function () {
+    return response()->json(['status' => 'ok', 'csrf_token' => csrf_token()]);
+});
+
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.post');
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
@@ -42,6 +46,7 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 Route::middleware('auth')->group(function () {
     Route::post('/profile/update-info', [ProfileController::class, 'updateInfo'])->name('profile.update-info');
     Route::post('/profile/update-password', [ProfileController::class, 'updatePassword'])->name('profile.update-password');
+    Route::post('/profile/avatar', [ProfileController::class, 'uploadAvatar'])->name('profile.avatar');
 });
 
 
@@ -160,7 +165,6 @@ Route::middleware(['auth', 'role:Editor-in-Chief,Associate Editor-in-Chief'])
         Route::put('/manage-accounts/{id}/role', [EicController::class, 'updateRole'])->name('manage-accounts.update-role');
         Route::patch('/manage-accounts/{id}/status', [EicController::class, 'toggleStatus'])->name('manage-accounts.toggle-status');
         Route::get('/activity-logs', [EicController::class, 'activityLogs'])->name('activity-logs');
-        Route::get('/transparency', [EicController::class, 'transparency'])->name('transparency');
         Route::get('/feedback-inbox', [EicController::class, 'feedbackInbox'])->name('feedback-inbox');
         Route::get('/feedback', function () {
             return redirect()->route('eic.feedback-inbox');

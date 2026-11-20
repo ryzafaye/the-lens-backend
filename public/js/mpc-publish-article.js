@@ -92,14 +92,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasHtmlTags = /<\/?(?:div|p|br|h[1-6]|blockquote|ul|ol|li|strong|b|em|i|u|s|a|hr)[^>]*>/i.test(content);
 
         if (hasHtmlTags) {
-            // Convert <p> tags to <div> with canonical <div><br></div> paragraph separators
+            // Standardize <p> to <div> without injecting artificial extra blank line breaks
             content = content
-                .replace(/<\/p>\s*<p[^>]*>/gi, '</div><div><br></div><div>')
                 .replace(/<p[^>]*>/gi, '<div>')
                 .replace(/<\/p>/gi, '</div>');
 
-            // Collapse multiple consecutive blank line divs into a single standard break
-            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){2,}/gi, '<div><br></div>');
+            // Collapse excessive consecutive blank lines (3 or more) to a single break
+            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){3,}/gi, '<div><br></div>');
 
             // Remove leading and trailing empty lines
             content = content
@@ -109,17 +108,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return content;
         }
 
-        // 6. Plain-text fallback: split into paragraphs and map to canonical block elements
-        const paragraphs = content
-            .split(/\r?\n\r?\n+/)
-            .map(p => p.trim())
-            .filter(p => p.length > 0);
-
-        if (paragraphs.length === 0) {
-            return '<p style="color: #98a2b3; font-style: italic;">No content available for this manuscript.</p>';
-        }
-
-        return paragraphs.map(p => `<div>${escapeHTML(p).replace(/\r?\n/g, '<br>')}</div>`).join('<div><br></div>');
+        // 6. Plain-text fallback: preserve exact line and paragraph spacing (cursor height)
+        const lines = content.split(/\r?\n/);
+        return lines.map(line => {
+            const trimmed = line.trim();
+            return trimmed ? `<div>${escapeHTML(trimmed)}</div>` : '<div><br></div>';
+        }).join('');
     }
 
     // -------------------------------------------------------------------------

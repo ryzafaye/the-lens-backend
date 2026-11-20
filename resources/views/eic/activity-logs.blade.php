@@ -7,13 +7,22 @@
 @endpush
 
 @section('content')
-<main class="content-container">
+<main class="content-container activity-page-main" id="activity-main-container">
 
     <div class="activity-logs-container">
 
-        <!-- 1. Clean Title of the Page -->
+        <!-- 1. Clean Title of the Page with Maximize Button -->
         <div class="activity-page-header">
-            <h1 class="activity-page-title">Activity Log</h1>
+            <div class="activity-header-left">
+                <h1 class="activity-page-title">Activity Log</h1>
+                <p class="activity-page-subtitle">Real-time audit stream of all editorial actions, manuscript submissions, approvals, and system activities across The Lens.</p>
+            </div>
+            <div class="activity-header-actions">
+                <button type="button" id="btn-maximize-activity" class="btn-activity-maximize" onclick="toggleFullscreenActivity()" title="Maximize Page / Full Screen">
+                    <i class="fa-solid fa-expand"></i>
+                    <span>Maximize Page</span>
+                </button>
+            </div>
         </div>
 
         <!-- 2. Under it: Search Bar + Date Filter (Today, Past 7 Days, Past 30 Days, Specific Date) -->
@@ -72,6 +81,23 @@
     <script>
         window.INITIAL_DATA = @json($activities ?? []);
         window.INITIAL_ACTIVITIES = window.INITIAL_DATA;
+
+        function toggleFullscreenActivity() {
+            const container = document.getElementById('activity-main-container');
+            const btn = document.getElementById('btn-maximize-activity');
+            if (!container) return;
+            const isFull = container.classList.toggle('fullscreen-active');
+            if (btn) {
+                btn.innerHTML = isFull 
+                    ? '<i class="fa-solid fa-compress"></i> <span>Restore View</span>'
+                    : '<i class="fa-solid fa-expand"></i> <span>Maximize Page</span>';
+            }
+            if (isFull && document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else if (!isFull && document.exitFullscreen && document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            }
+        }
     </script>
     <script src="{{ asset('js/shared-activity-logs.js') }}"></script>
 @endpush

@@ -28,8 +28,8 @@ class CachedEloquentUserProvider extends EloquentUserProvider
             return $user;
         });
 
-        if ($user && !$user->relationLoaded('role')) {
-            $user->loadMissing('role');
+        if ($user && (!$user->relationLoaded('role') || $user->role === null)) {
+            $user->load('role');
         }
 
         return $user;

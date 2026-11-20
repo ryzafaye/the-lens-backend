@@ -104,7 +104,37 @@ class EicController extends Controller
             ->get()
             ->map->formatForTimeline();
 
-        return view('eic.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'recentActivities'));
+        $topJournalists = Cache::remember('eic_dashboard_top_journalists', 60, function () {
+            return Article::where('status', 'Published')
+                ->selectRaw('user_id, COUNT(*) as article_count')
+                ->groupBy('user_id')
+                ->orderByDesc('article_count')
+                ->take(5)
+                ->with('user.role')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => $row->user_id,
+                        'name' => $row->user->full_name ?? 'Author',
+                        'role' => $row->user->role->role_name ?? 'Writer',
+                        'avatar' => $row->user->avatar_url ?? ($row->user->avatar ? asset($row->user->avatar) : asset('images/member-placeholder.svg')),
+                        'article_count' => (int) $row->article_count,
+                    ];
+                });
+        });
+
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json([
+                'user' => (new AuthController)->formatUserData($user),
+                'metrics' => $metrics,
+                'pendingArticles' => $pendingArticles,
+                'publishedArticles' => $publishedArticles,
+                'recentActivities' => $recentActivities,
+                'topJournalists' => $topJournalists,
+            ]);
+        }
+
+        return view('eic.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'recentActivities', 'topJournalists'));
     }
 
     public function manageArticles(Request $request)
@@ -142,7 +172,7 @@ class EicController extends Controller
                 });
         });
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json($articles);
         }
 
@@ -190,15 +220,32 @@ class EicController extends Controller
             $article->slug = \Illuminate\Support\Str::slug((string) $request->input('title'));
         }
         if ($request->has('excerpt')) {
-            $article->excerpt = (string) $request->input('excerpt');
+            $article->excerpt = Article::cleanArticleBodyText((string) $request->input('excerpt'));
         }
         if ($request->has('content') || $request->has('body')) {
-            $article->content = (string) ($request->input('content') ?? $request->input('body'));
+            $article->content = Article::cleanArticleBodyText((string) ($request->input('content') ?? $request->input('body')));
         }
         if ($request->filled('category')) {
-            $cat = Category::where('name', $request->input('category'))
-                ->orWhere('slug', \Illuminate\Support\Str::slug((string) $request->input('category')))
+            $catInput = trim((string) $request->input('category'));
+            $cat = Category::where('name', $catInput)
+                ->orWhere('slug', \Illuminate\Support\Str::slug($catInput))
+                ->orWhere('name', 'like', "%{$catInput}%")
                 ->first();
+
+            if (!$cat) {
+                if (stripos($catInput, 'sci') !== false || stripos($catInput, 'tech') !== false) {
+                    $cat = Category::where('name', 'like', '%Sci%')->first();
+                } elseif (stripos($catInput, 'feat') !== false) {
+                    $cat = Category::where('name', 'like', '%Feat%')->first();
+                } elseif (stripos($catInput, 'opin') !== false) {
+                    $cat = Category::where('name', 'like', '%Opin%')->first();
+                } elseif (stripos($catInput, 'lit') !== false) {
+                    $cat = Category::where('name', 'like', '%Liter%')->first();
+                } elseif (stripos($catInput, 'news') !== false) {
+                    $cat = Category::where('name', 'like', '%News%')->first();
+                }
+            }
+
             if ($cat) {
                 $article->category_id = $cat->id;
             }
@@ -207,25 +254,40 @@ class EicController extends Controller
 
         Cache::forget('all_articles_for_management');
         Cache::forget('eic_articles_for_management');
+        Article::clearArticleCaches($article);
+
+        // Reload category name for JSON response
+        $article->loadMissing('category');
 
         return response()->json([
             'success' => true,
             'message' => 'Article updated successfully.',
-            'article' => $article,
+            'article' => [
+                'id' => (int) $article->id,
+                'title' => $article->title,
+                'slug' => $article->slug,
+                'category' => $article->category?->name ?? 'General',
+                'excerpt' => $article->excerpt,
+                'content' => $article->content,
+            ],
         ]);
     }
 
     public function destroyArticle(Request $request, int|string $id): JsonResponse
     {
         $article = Article::findOrFail($id);
+
+        // Emergency Delete is a strict hard-delete: purge related image assets and article record permanently
+        $article->images()->delete();
         $article->delete();
 
         Cache::forget('all_articles_for_management');
         Cache::forget('eic_articles_for_management');
+        Article::clearArticleCaches($article);
 
         return response()->json([
             'success' => true,
-            'message' => 'Article permanently deleted.',
+            'message' => 'Article permanently deleted from database.',
         ]);
     }
 
@@ -255,6 +317,10 @@ class EicController extends Controller
                     'author' => $user->full_name ?? ($article->user->full_name ?? 'Staff Writer'),
                 ];
             });
+
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json($articles);
+        }
 
         return view('eic.manage-my-articles', compact('articles'));
     }
@@ -419,6 +485,14 @@ class EicController extends Controller
             });
         });
 
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'pendingArticles' => $pendingArticles,
+                'sort' => $sort,
+                'categoryHeads' => $categoryHeads,
+            ]);
+        }
+
         return view('eic.review-articles', compact('pendingArticles', 'sort', 'categoryHeads'));
     }
 
@@ -494,7 +568,7 @@ class EicController extends Controller
         Cache::forget('mpc_dashboard_pending_articles');
         Cache::forget('mpc_dashboard_published_articles');
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json(['success' => true, 'message' => 'Article approved and forwarded to Media & Publication Committee.']);
         }
 
@@ -507,14 +581,23 @@ class EicController extends Controller
             'remarks' => 'required|string',
         ]);
 
-        $article = Article::findOrFail($id);
+        $article = Article::with('category')->findOrFail($id);
+        $catName = $article->category->name ?? '';
+        $isOpinion = stripos($catName, 'opinion') !== false;
+
+        $targetStatus = $isOpinion ? 'For Writer Revision' : 'For Head Revision';
+        $message = $isOpinion
+            ? 'Opinion article returned to author for writer revision.'
+            : "Article returned to {$catName} Head for head revision.";
+
         $article->update([
-            'status' => 'For Revision',
+            'status' => $targetStatus,
             'remarks' => $request->remarks,
         ]);
 
         ActivityLog::logAction(Auth::id(), 'returned for revision', $article);
 
+        Article::clearArticleCaches($article);
         Cache::forget('eic_dashboard_stats');
         Cache::forget('eic_dashboard_pending_articles');
         Cache::forget('eic_review_articles_newest');
@@ -523,11 +606,11 @@ class EicController extends Controller
         Cache::forget('mpc_dashboard_pending_articles');
         Cache::forget('mpc_dashboard_published_articles');
 
-        if ($request->wantsJson() || $request->ajax()) {
-            return response()->json(['success' => true, 'message' => 'Article returned to writer with revision remarks.']);
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['success' => true, 'message' => $message]);
         }
 
-        return redirect()->back()->with('warning', 'Article returned to writer with revision remarks.');
+        return redirect()->back()->with('warning', $message);
     }
 
     /**
@@ -557,6 +640,10 @@ class EicController extends Controller
             ->values()
             ->all();
 
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['coverList' => $coverList]);
+        }
+
         return view('eic.media-desk', compact('coverList'));
     }
 
@@ -574,7 +661,7 @@ class EicController extends Controller
 
         Cache::forget('mpc_dashboard_stats');
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
                 'message' => 'Visual asset approved into publication library.',
@@ -601,7 +688,7 @@ class EicController extends Controller
         $this->imageService->returnForRevision($image, $user, (string) $request->remarks);
         ActivityLog::logAction($user->id, 'returned visual asset for revision');
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
                 'message' => 'Visual asset returned for revision.',
@@ -628,6 +715,14 @@ class EicController extends Controller
                 ->where('user_id', Auth::id())
                 ->whereIn('status', ['Draft', 'For Revision'])
                 ->find($request->draft_id);
+        }
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'categories' => $categories,
+                'drafts' => $drafts,
+                'editingDraft' => $editingDraft,
+            ]);
         }
 
         return view('eic.submit-article', compact('categories', 'drafts', 'editingDraft'));
@@ -682,6 +777,14 @@ class EicController extends Controller
                     Cache::forget('exec_review_articles_all_newest');
                     Cache::forget('exec_review_articles_all_oldest');
 
+                    if ($request->wantsJson() || $request->is('api/*')) {
+                        return response()->json([
+                            'success' => true,
+                            'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to review queue.',
+                            'article' => $article,
+                        ]);
+                    }
+
                     if ($targetStatus === 'Draft') {
                         return redirect()->route('eic.submit-article', ['tab' => 'drafts'])
                             ->with('success', 'Draft saved successfully.');
@@ -716,6 +819,14 @@ class EicController extends Controller
             Cache::forget('exec_review_articles_all_newest');
             Cache::forget('exec_review_articles_all_oldest');
 
+            if ($request->wantsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to review queue.',
+                    'article' => $article,
+                ]);
+            }
+
             if ($targetStatus === 'Draft') {
                 return redirect()->route('eic.submit-article', ['tab' => 'drafts'])
                     ->with('success', 'Draft saved successfully.');
@@ -725,6 +836,9 @@ class EicController extends Controller
                 ->with('success', 'Article submitted and forwarded to review queue.');
 
         } catch (\Exception $e) {
+            if ($request->wantsJson() || $request->is('api/*')) {
+                return response()->json(['message' => 'Database Error: ' . $e->getMessage()], 422);
+            }
             return back()->withErrors(['system_error' => 'Database Error: ' . $e->getMessage()])->withInput();
         }
     }
@@ -737,7 +851,7 @@ class EicController extends Controller
 
         $draft->delete();
 
-        if (request()->wantsJson()) {
+        if (request()->wantsJson() || request()->is('api/*')) {
             return response()->json(['success' => true, 'message' => 'Draft deleted successfully.']);
         }
 
@@ -769,7 +883,7 @@ class EicController extends Controller
             ];
         });
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
                 'officers' => $formattedOfficers,
@@ -788,6 +902,9 @@ class EicController extends Controller
         if (!$request->filled('full_name') && $request->filled('name')) {
             $request->merge(['full_name' => $request->input('name')]);
         }
+        if ($request->filled('student_number')) {
+            $request->merge(['student_number' => strtoupper(trim((string) $request->input('student_number')))]);
+        }
 
         $roleId = $request->input('role_id');
         if (!$roleId && $request->filled('role')) {
@@ -800,16 +917,28 @@ class EicController extends Controller
         $request->merge(['role_id' => $roleId]);
 
         $validated = $request->validate([
-            'student_number' => 'required|string|max:50|unique:users,student_number',
+            'student_number' => [
+                'required',
+                'string',
+                'regex:/^\d{4}-\d{5}-BN-0$/',
+                'unique:users,student_number',
+            ],
             'full_name' => 'required|string|max:255',
             'role_id' => 'required|exists:roles,id',
+        ], [
+            'student_number.required' => 'Student number is required.',
+            'student_number.regex' => 'The student number format must be YEAR-5DIGIT-BN-0 (e.g. 2024-00010-BN-0).',
+            'student_number.unique' => 'This student number is already registered to another account.',
+            'full_name.required' => 'Full name is required.',
+            'role_id.required' => 'Please select a valid role.',
+            'role_id.exists' => 'The selected role is invalid.',
         ]);
 
         $officer = User::create([
             'student_number' => $validated['student_number'],
             'full_name' => $validated['full_name'],
             'role_id' => $validated['role_id'],
-            'password' => Hash::make('password123'),
+            'password' => Hash::make('thelenspupBN0'),
             'account_status' => 'active',
         ]);
 
@@ -832,15 +961,15 @@ class EicController extends Controller
             'status' => $officer->account_status ?? 'active',
         ];
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
-                'message' => 'Officer account created successfully.',
+                'message' => 'Officer account created successfully. Default password is thelenspupBN0.',
                 'officer' => $formatted,
             ]);
         }
 
-        return redirect()->back()->with('success', 'Officer account created successfully.');
+        return redirect()->back()->with('success', 'Officer account created successfully. Default password is thelenspupBN0.');
     }
 
     public function updateRole(Request $request, $id)
@@ -885,7 +1014,7 @@ class EicController extends Controller
             'status' => $officer->account_status ?? 'active',
         ];
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
                 'message' => "Role for {$officer->full_name} updated to {$officer->role->role_name}.",
@@ -910,7 +1039,7 @@ class EicController extends Controller
         }
 
         if ($officer->id === Auth::id() && $status === 'deactivated') {
-            if ($request->wantsJson() || $request->ajax()) {
+            if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'You cannot deactivate your own active account.',
@@ -945,7 +1074,7 @@ class EicController extends Controller
             'status' => $officer->account_status ?? 'active',
         ];
 
-        if ($request->wantsJson() || $request->ajax()) {
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
                 'message' => "Officer account {$statusLabel}.",
@@ -965,39 +1094,35 @@ class EicController extends Controller
             ->get()
             ->map->formatForTimeline();
 
-        return view('eic.activity-logs', compact('activities'));
-    }
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json($activities);
+        }
 
-    public function transparency()
-    {
-        return view('eic.transparency');
+        return view('eic.activity-logs', compact('activities'));
     }
 
     public function feedbackInbox()
     {
         $feedbacks = [];
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['feedbacks' => $feedbacks]);
+        }
+
         return view('eic.feedback-inbox', compact('feedbacks'));
     }
 
     public function profileSettings()
     {
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['user' => (new AuthController)->formatUserData(Auth::user())]);
+        }
+
         return view('eic.profile-settings');
     }
 
     private function sanitizeArticleContent($content)
     {
-        if (!$content) return '';
-
-        $decoded = html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        while (($nextDecoded = html_entity_decode($decoded, ENT_QUOTES | ENT_HTML5, 'UTF-8')) !== $decoded) {
-            $decoded = $nextDecoded;
-        }
-
-        $sanitized = preg_replace('/<\/?span[^>]*>/i', '', $decoded);
-        $sanitized = preg_replace('/\s*style\s*=\s*("[^"]*"|\'[^\']*\')/i', '', $sanitized);
-        $sanitized = preg_replace('/\s*class\s*=\s*("[^"]*"|\'[^\']*\')/i', '', $sanitized);
-
-        return trim($sanitized);
+        return Article::cleanArticleBodyText($content);
     }
 }
 

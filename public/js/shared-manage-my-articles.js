@@ -154,14 +154,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasHtmlTags = /<\/?(?:div|p|br|h[1-6]|blockquote|ul|ol|li|strong|b|em|i|u|s|a|hr)[^>]*>/i.test(content);
 
         if (hasHtmlTags) {
-            // Convert <p> tags to <div> with canonical <div><br></div> paragraph separators
+            // Standardize <p> to <div> without injecting artificial extra blank line breaks
             content = content
-                .replace(/<\/p>\s*<p[^>]*>/gi, '</div><div><br></div><div>')
                 .replace(/<p[^>]*>/gi, '<div>')
                 .replace(/<\/p>/gi, '</div>');
 
-            // Collapse multiple consecutive blank line divs into a single standard break
-            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){2,}/gi, '<div><br></div>');
+            // Collapse excessive consecutive blank lines (3 or more) to a single break
+            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){3,}/gi, '<div><br></div>');
 
             // Remove leading and trailing empty lines
             content = content
@@ -171,31 +170,21 @@ document.addEventListener('DOMContentLoaded', () => {
             return content;
         }
 
-        // 6. Plain-text fallback: split into paragraphs and map to canonical block elements
-        const paragraphs = content
-            .split(/\r?\n\r?\n+/)
-            .map(p => p.trim())
-            .filter(p => p.length > 0);
-
-        if (paragraphs.length === 0) {
-            return '<p style="color: #98a2b3; font-style: italic;">No content available for this manuscript.</p>';
-        }
-
-        return paragraphs.map(p => `<div>${escapeHTML(p).replace(/\r?\n/g, '<br>')}</div>`).join('<div><br></div>');
+        // 6. Plain-text fallback: preserve exact line and paragraph spacing (cursor height)
+        const lines = content.split(/\r?\n/);
+        return lines.map(line => {
+            const trimmed = line.trim();
+            return trimmed ? `<div>${escapeHTML(trimmed)}</div>` : '<div><br></div>';
+        }).join('');
     }
 
     function getStatusBadgeClass(status) {
-        switch (status) {
-            case 'Published':
-                return 'status-published';
-            case 'Pending Review':
-                return 'status-pending';
-            case 'For Revision':
-                return 'status-revision';
-            case 'Draft':
-            default:
-                return 'status-draft';
-        }
+        if (!status) return 'status-draft';
+        const s = status.toLowerCase();
+        if (s.includes('publish') || s.includes('approve')) return 'status-published';
+        if (s.includes('pending')) return 'status-pending';
+        if (s.includes('revision')) return 'status-revision';
+        return 'status-draft';
     }
 
     function showToast(message, type = 'success') {
@@ -224,14 +213,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateTabBadges(articles) {
         const total = articles.length;
-        const published = articles.filter(a => (a.status || '').toLowerCase().trim() === 'published').length;
+        const published = articles.filter(a => {
+            const st = (a.status || '').toLowerCase().trim();
+            return st === 'published' || st === 'approved';
+        }).length;
         const pending = articles.filter(a => {
             const st = (a.status || '').toLowerCase().trim();
-            return st === 'pending review' || st === 'pending';
+            if (st.includes('head revision') || st.includes('section revision')) return false;
+            return st.includes('pending');
         }).length;
         const revision = articles.filter(a => {
             const st = (a.status || '').toLowerCase().trim();
-            return st === 'for revision' || st === 'revision';
+            if (st.includes('head revision') || st.includes('section revision')) return false;
+            return st.includes('revision');
         }).length;
         const drafts = articles.filter(a => {
             const st = (a.status || '').toLowerCase().trim();
@@ -260,9 +254,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Filter by tab
         let filtered = allMyArticles.filter(item => {
             const st = (item.status || '').toLowerCase().trim();
-            if (currentTab === 'published') return st === 'published';
-            if (currentTab === 'pending') return st === 'pending review' || st === 'pending';
-            if (currentTab === 'revision') return st === 'for revision' || st === 'revision';
+            if (currentTab === 'published') return st === 'published' || st === 'approved';
+            if (currentTab === 'pending') return st.includes('pending') && !st.includes('head revision') && !st.includes('section revision');
+            if (currentTab === 'revision') return st.includes('revision') && !st.includes('head revision') && !st.includes('section revision');
             if (currentTab === 'drafts') return st === 'draft' || st === 'drafts';
             return true; // 'all'
         });
@@ -409,12 +403,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <i class="fa-regular fa-eye"></i> ${formatNumber(item.views)} views
                                 </span>
                             ` : ''}
-                            ${item.remarks ? `
-                                <span class="meta-dot">&bull;</span>
-                                <span style="color: #b42318; font-size: 0.74rem; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
-                                    <i class="fa-solid fa-comment-dots"></i> Feedback
-                                </span>
-                            ` : ''}
                         </div>
                         <div class="article-card-status-top">
                             <span class="status-badge ${badgeClass}">${escapeHTML(item.status)}</span>
@@ -422,35 +410,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
 
                     <div class="article-card-body">
-                        <h3 class="article-card-title">${escapeHTML(item.title)}</h3>
-                        ${item.excerpt ? `
-                            <p class="article-card-excerpt">
-                                ${escapeHTML(item.excerpt)}
-                            </p>
-                        ` : ''}
-                    </div>
+                        <div class="article-card-body-content">
+                            <h3 class="article-card-title">${escapeHTML(item.title)}</h3>
+                            ${item.excerpt ? `
+                                <p class="article-card-excerpt">
+                                    ${escapeHTML(item.excerpt)}
+                                </p>
+                            ` : ''}
+                        </div>
 
-                    ${(item.status === 'Draft' || item.status === 'For Revision') ? `
-                        <div class="article-card-footer">
-                            ${item.status === 'Draft' ? `
-                                <a href="${submitArticleUrl}?draft_id=${encodeURIComponent(item.id)}" class="btn-box-view" style="text-decoration: none;" title="Edit draft in editor" onclick="event.stopPropagation()">
+                        ${(item.status === 'Draft' || ((item.status.includes('Revision') || item.status.includes('revision')) && !item.status.toLowerCase().includes('head') && !item.status.toLowerCase().includes('section'))) ? `
+                            <div class="article-card-actions">
+                                <a href="${submitArticleUrl}?draft_id=${encodeURIComponent(item.id)}" class="btn-box-view btn-box-edit" style="text-decoration: none;" title="${item.status === 'Draft' ? 'Edit draft in editor' : 'Edit and revise manuscript'}" onclick="event.stopPropagation()">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                     <span>Edit</span>
                                 </a>
-                                <button type="button" class="btn-box-view btn-delete-draft" data-id="${item.id}" data-title="${escapeHTML(item.title)}" style="color: #b42318;" title="Delete draft" onclick="event.stopPropagation()">
-                                    <i class="fa-regular fa-trash-can"></i>
-                                    <span>Delete</span>
-                                </button>
-                            ` : ''}
-
-                            ${item.status === 'For Revision' ? `
-                                <a href="${submitArticleUrl}?draft_id=${encodeURIComponent(item.id)}" class="btn-box-view" style="text-decoration: none;" title="Edit and revise manuscript" onclick="event.stopPropagation()">
-                                    <i class="fa-solid fa-pen-to-square"></i>
-                                    <span>Revise</span>
-                                </a>
-                            ` : ''}
-                        </div>
-                    ` : ''}
+                                ${item.status === 'Draft' ? `
+                                    <button type="button" class="btn-box-view btn-delete-draft" data-id="${item.id}" data-title="${escapeHTML(item.title)}" style="color: #b42318;" title="Delete draft" onclick="event.stopPropagation()">
+                                        <i class="fa-regular fa-trash-can"></i>
+                                        <span>Delete</span>
+                                    </button>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
                 </article>
             `;
         }).join('');
@@ -780,6 +763,28 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+
+    // Synchronize initial tab and sort from URL query parameters (e.g. from dashboard cards)
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tabParam = (urlParams.get('tab') || '').toLowerCase().trim();
+        const sortParam = (urlParams.get('sort') || '').toLowerCase().trim();
+
+        if (tabParam && ['published', 'pending', 'revision', 'drafts', 'all'].includes(tabParam)) {
+            currentTab = tabParam;
+            tabButtons.forEach(btn => {
+                const isActive = (btn.getAttribute('data-tab') || '').toLowerCase() === currentTab;
+                btn.classList.toggle('active', isActive);
+                btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+        }
+
+        if (sortParam && ['newest', 'oldest', 'popular', 'az'].includes(sortParam)) {
+            currentSort = sortParam;
+            const sortSelect = document.getElementById('review-sort-select') || document.getElementById('sort-select');
+            if (sortSelect) sortSelect.value = sortParam;
+        }
+    } catch (e) {}
 
     // Initial render
     filterAndSortArticles();

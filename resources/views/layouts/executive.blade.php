@@ -76,14 +76,6 @@
             </div>
 
             <div class="topbar-right">
-                <button type="button" class="topbar-notification-btn" aria-label="View notifications">
-                    <span class="notification-icon-wrapper">
-                        <i class="fa-regular fa-bell"></i>
-                        <span class="notification-badge-dot"></span>
-                    </span>
-                    <span class="notification-label">Notification</span>
-                </button>
-                <div class="topbar-divider"></div>
                 <div class="topbar-user-profile">
                     <div class="topbar-avatar-circle" title="User Profile">
                         <img src="{{ Auth::user()?->avatar_url ?? (Auth::user()?->avatar ? asset(Auth::user()->avatar) : asset('images/member-placeholder.svg')) }}" alt="User Profile Picture">
@@ -152,7 +144,7 @@
                     <span>Activity log</span>
                 </a>
 
-                @if(!request()->is('section-head*'))
+                @if(!request()->is('section-head*') && in_array(Auth::user()?->role?->role_name, ['Auditor', 'Treasurer']))
                 <a href="{{ route('executive.transparency') }}" class="mobile-nav-link {{ request()->is('executive/transparency*') || request()->routeIs('executive.transparency*') ? 'active' : '' }}">
                     <i class="fa-solid fa-file-invoice-dollar"></i>
                     <span>Transparency</span>

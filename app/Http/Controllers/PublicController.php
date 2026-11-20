@@ -11,57 +11,89 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
 
 class PublicController extends Controller
 {
     /**
+     * Standard columns to select for list views, excluding heavy body/content fields.
+     */
+    protected const LIST_COLUMNS = [
+        'id',
+        'title',
+        'slug',
+        'excerpt',
+        'category_id',
+        'user_id',
+        'published_at',
+        'views',
+        'shares',
+        'created_at',
+    ];
+
+    /**
      * Display the public homepage.
      */
     public function index(): View
     {
-        $baseQuery = Article::with(['coverImage', 'user.role', 'category'])
+        $categories = Cache::remember('public_categories_all', 600, function () {
+            return Category::select(['id', 'name', 'slug'])->get();
+        });
+
+        $cachedData = Cache::remember('public_home_data_web', 600, function () use ($categories) {
+            $baseQuery = Article::with([
+                'coverImage:id,article_id,file_url,is_cover',
+                'user:id,full_name,role_id',
+                'category:id,name,slug'
+            ])
+            ->select(self::LIST_COLUMNS)
             ->whereRaw('LOWER(status) = ?', ['published'])
             ->where('is_archived', false)
             ->latest('published_at');
 
-        $featuredArticle = (clone $baseQuery)->first();
+            $featuredArticle = (clone $baseQuery)->first();
 
-        $latestArticles = (clone $baseQuery)
-            ->when($featuredArticle, fn ($q) => $q->where('id', '!=', $featuredArticle->id))
-            ->take(4)
-            ->get();
+            $latestArticles = (clone $baseQuery)
+                ->when($featuredArticle, fn ($q) => $q->where('id', '!=', $featuredArticle->id))
+                ->take(4)
+                ->get();
 
-        $excludeIds = array_filter(array_merge(
-            [$featuredArticle?->id],
-            $latestArticles->pluck('id')->all()
-        ));
+            $excludeIds = array_filter(array_merge(
+                [$featuredArticle?->id],
+                $latestArticles->pluck('id')->all()
+            ));
 
-        $moreStories = (clone $baseQuery)
-            ->whereNotIn('id', $excludeIds)
-            ->take(3)
-            ->get();
+            $moreStories = (clone $baseQuery)
+                ->whereNotIn('id', $excludeIds)
+                ->take(3)
+                ->get();
 
-        $categories = Category::select(['id', 'name', 'slug'])->get();
-
-        $categoryArticles = [];
-        foreach ($categories as $cat) {
-            $categoryArticles[$cat->id] = Article::with(['coverImage', 'user.role', 'category'])
-                ->where('category_id', $cat->id)
+            $categoryIds = $categories->pluck('id')->all();
+            $categoryArticles = [];
+            if (!empty($categoryIds)) {
+                $allArticles = Article::with([
+                    'coverImage:id,article_id,file_url,is_cover',
+                    'user:id,full_name,role_id',
+                    'category:id,name,slug'
+                ])
+                ->select(self::LIST_COLUMNS)
+                ->whereIn('category_id', $categoryIds)
                 ->whereRaw('LOWER(status) = ?', ['published'])
                 ->where('is_archived', false)
                 ->latest('published_at')
-                ->take(3)
-                ->get();
-        }
+                ->get()
+                ->groupBy('category_id');
 
-        return view('index', compact(
-            'featuredArticle',
-            'latestArticles',
-            'moreStories',
-            'categories',
-            'categoryArticles'
-        ));
+                foreach ($categories as $cat) {
+                    $categoryArticles[$cat->id] = ($allArticles->get($cat->id) ?? collect())->take(3)->values();
+                }
+            }
+
+            return compact('featuredArticle', 'latestArticles', 'moreStories', 'categoryArticles');
+        });
+
+        return view('index', array_merge($cachedData, ['categories' => $categories]));
     }
 
     /**
@@ -70,81 +102,99 @@ class PublicController extends Controller
      */
     public function apiHome(): JsonResponse
     {
-        // Re‑use the same query logic as index()
-        $baseQuery = Article::with(['coverImage', 'user.role', 'category'])
+        $categories = Cache::remember('public_categories_all', 600, function () {
+            return Category::select(['id', 'name', 'slug'])->get();
+        });
+
+        $props = Cache::remember('public_home_data_api', 600, function () use ($categories) {
+            $baseQuery = Article::with([
+                'coverImage:id,article_id,file_url,is_cover',
+                'user:id,full_name,role_id',
+                'category:id,name,slug'
+            ])
+            ->select(self::LIST_COLUMNS)
             ->whereRaw('LOWER(status) = ?', ['published'])
             ->where('is_archived', false)
             ->latest('published_at');
 
-        $featuredArticle = (clone $baseQuery)->first();
+            $featuredArticle = (clone $baseQuery)->first();
 
-        $latestArticles = (clone $baseQuery)
-            ->when($featuredArticle, fn ($q) => $q->where('id', '!=', $featuredArticle->id))
-            ->take(4)
-            ->get();
+            $latestArticles = (clone $baseQuery)
+                ->when($featuredArticle, fn ($q) => $q->where('id', '!=', $featuredArticle->id))
+                ->take(4)
+                ->get();
 
-        $excludeIds = array_filter(array_merge(
-            [$featuredArticle?->id],
-            $latestArticles->pluck('id')->all()
-        ));
+            $excludeIds = array_filter(array_merge(
+                [$featuredArticle?->id],
+                $latestArticles->pluck('id')->all()
+            ));
 
-        $moreStories = (clone $baseQuery)
-            ->whereNotIn('id', $excludeIds)
-            ->take(3)
-            ->get();
+            $moreStories = (clone $baseQuery)
+                ->whereNotIn('id', $excludeIds)
+                ->take(3)
+                ->get();
 
-        $categories = Category::select(['id', 'name', 'slug'])->get();
-
-        $categoryArticles = [];
-        foreach ($categories as $cat) {
-            $categoryArticles[$cat->id] = Article::with(['coverImage', 'user.role', 'category'])
-                ->where('category_id', $cat->id)
+            $categoryIds = $categories->pluck('id')->all();
+            $categoryArticles = [];
+            if (!empty($categoryIds)) {
+                $allArticles = Article::with([
+                    'coverImage:id,article_id,file_url,is_cover',
+                    'user:id,full_name,role_id',
+                    'category:id,name,slug'
+                ])
+                ->select(self::LIST_COLUMNS)
+                ->whereIn('category_id', $categoryIds)
                 ->whereRaw('LOWER(status) = ?', ['published'])
                 ->where('is_archived', false)
                 ->latest('published_at')
-                ->take(3)
-                ->get();
-        }
+                ->get()
+                ->groupBy('category_id');
 
-        // Helper closure to shape an article for the API
-        $shapeArticle = function (Article $article) {
-            $words = str_word_count(strip_tags($article->content ?? ''));
-            $readMinutes = max(1, (int) ceil($words / 200));
-            $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
-            $categoryName = $article->category->name ?? null;
-            $authorName = $article->user->full_name ?? null;
-            $authorUrl = $authorName ? route('public.author', $article->user_id) : null;
+                foreach ($categories as $cat) {
+                    $categoryArticles[$cat->id] = ($allArticles->get($cat->id) ?? collect())->take(3)->values();
+                }
+            }
+
+            $shapeArticle = function (Article $article) {
+                $text = !empty($article->content) ? $article->content : ($article->excerpt ?? '');
+                $words = str_word_count(strip_tags($text));
+                $readMinutes = max(1, (int) ceil(($words > 100 ? $words : $words * 4) / 200));
+                $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
+                $categoryName = $article->category->name ?? null;
+                $authorName = $article->user->full_name ?? null;
+                $authorUrl = $authorName ? route('public.author', $article->user_id) : null;
+
+                return [
+                    'id' => $article->id,
+                    'url' => route('public.article', $article->slug),
+                    'imageUrl' => $imageUrl,
+                    'title' => $article->title,
+                    'category' => $categoryName,
+                    'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : $article->created_at->format('M d, Y'),
+                    'excerpt' => $article->excerpt,
+                    'author' => $authorName,
+                    'authorUrl' => $authorUrl,
+                    'views' => $article->views,
+                    'shares' => $article->shares,
+                    'readMinutes' => $readMinutes,
+                ];
+            };
 
             return [
-                'id' => $article->id,
-                'url' => route('public.article', $article->slug),
-                'imageUrl' => $imageUrl,
-                'title' => $article->title,
-                'category' => $categoryName,
-                'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : $article->created_at->format('M d, Y'),
-                'excerpt' => $article->excerpt,
-                'author' => $authorName,
-                'authorUrl' => $authorUrl,
-                'views' => $article->views,
-                'shares' => $article->shares,
-                'readMinutes' => $readMinutes,
+                'featuredArticle' => $featuredArticle ? $shapeArticle($featuredArticle) : null,
+                'latestArticles' => $latestArticles->map($shapeArticle)->values(),
+                'moreStories' => $moreStories->map($shapeArticle)->values(),
+                'categorySections' => $categories->map(function ($cat) use ($categoryArticles, $shapeArticle) {
+                    $articles = $categoryArticles[$cat->id] ?? collect();
+                    return (object) [
+                        'id' => $cat->id,
+                        'name' => $cat->name,
+                        'slug' => $cat->slug,
+                        'articles' => $articles->map($shapeArticle)->values(),
+                    ];
+                })->values(),
             ];
-        };
-
-        $props = [
-            'featuredArticle' => $featuredArticle ? $shapeArticle($featuredArticle) : null,
-            'latestArticles' => $latestArticles->map($shapeArticle)->values(),
-            'moreStories' => $moreStories->map($shapeArticle)->values(),
-            'categorySections' => $categories->map(function ($cat) use ($categoryArticles, $shapeArticle) {
-                $articles = $categoryArticles[$cat->id] ?? collect();
-                return (object) [
-                    'id' => $cat->id,
-                    'name' => $cat->name,
-                    'slug' => $cat->slug,
-                    'articles' => $articles->map($shapeArticle)->values(),
-                ];
-            })->values(),
-        ];
+        });
 
         return response()->json([
             'props' => $props,
@@ -164,9 +214,14 @@ class PublicController extends Controller
         $dateType = (string) $request->query('dateType', 'any');
         $dateValue = (string) $request->query('dateValue', '');
 
-        $articlesQuery = Article::with(['coverImage', 'user.role', 'category'])
-            ->whereRaw('LOWER(status) = ?', ['published'])
-            ->where('is_archived', false);
+        $articlesQuery = Article::with([
+            'coverImage:id,article_id,file_url,is_cover',
+            'user:id,full_name,role_id',
+            'category:id,name,slug'
+        ])
+        ->select(self::LIST_COLUMNS)
+        ->whereRaw('LOWER(status) = ?', ['published'])
+        ->where('is_archived', false);
 
         if ($categoryParam !== 'All' && !empty($categoryParam)) {
             $articlesQuery->whereHas('category', function ($q) use ($categoryParam) {
@@ -201,11 +256,14 @@ class PublicController extends Controller
         };
 
         $articles = $articlesQuery->paginate(12)->withQueryString();
-        $categories = Category::select(['id', 'name', 'slug'])->get();
+        $categories = Cache::remember('public_categories_all', 600, function () {
+            return Category::select(['id', 'name', 'slug'])->get();
+        });
 
         $shapeArticle = function (Article $article) {
-            $words = str_word_count(strip_tags($article->content ?? ''));
-            $readMinutes = max(1, (int) ceil($words / 200));
+            $text = !empty($article->content) ? $article->content : ($article->excerpt ?? '');
+            $words = str_word_count(strip_tags($text));
+            $readMinutes = max(1, (int) ceil(($words > 100 ? $words : $words * 4) / 200));
             $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
             $categoryName = $article->category->name ?? null;
             $authorName = $article->user->full_name ?? null;
@@ -268,11 +326,16 @@ class PublicController extends Controller
         $slug = strtolower(trim($category_slug));
 
         if ($slug === 'latest') {
-            $articles = Article::with(['coverImage', 'user.role', 'category'])
-                ->whereRaw('LOWER(status) = ?', ['published'])
-                ->where('is_archived', false)
-                ->latest('published_at')
-                ->paginate(12);
+            $articles = Article::with([
+                'coverImage:id,article_id,file_url,is_cover',
+                'user:id,full_name,role_id',
+                'category:id,name,slug'
+            ])
+            ->select(self::LIST_COLUMNS)
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false)
+            ->latest('published_at')
+            ->paginate(12);
 
             $currentCategory = (object) [
                 'id' => null,
@@ -303,12 +366,17 @@ class PublicController extends Controller
             $category = Category::whereRaw('LOWER(name) LIKE ?', ["%{$normalizedSlug}%"])->firstOrFail();
         }
 
-        $articles = Article::with(['coverImage', 'user.role', 'category'])
-            ->where('category_id', $category->id)
-            ->whereRaw('LOWER(status) = ?', ['published'])
-            ->where('is_archived', false)
-            ->latest('published_at')
-            ->paginate(12);
+        $articles = Article::with([
+            'coverImage:id,article_id,file_url,is_cover',
+            'user:id,full_name,role_id',
+            'category:id,name,slug'
+        ])
+        ->select(self::LIST_COLUMNS)
+        ->where('category_id', $category->id)
+        ->whereRaw('LOWER(status) = ?', ['published'])
+        ->where('is_archived', false)
+        ->latest('published_at')
+        ->paginate(12);
 
         $currentCategory = (object) [
             'id' => $category->id,
@@ -339,25 +407,35 @@ class PublicController extends Controller
         // Increment view count for the public article
         $article->increment('views');
 
-        // Fetch related articles (same category, excluding current)
-        $relatedArticles = Article::with(['coverImage', 'user.role', 'category'])
-            ->where('id', '!=', $article->id)
-            ->where('category_id', $article->category_id)
-            ->whereRaw('LOWER(status) = ?', ['published'])
-            ->where('is_archived', false)
-            ->latest('published_at')
-            ->take(3)
-            ->get();
+        // Fetch related articles (same category, excluding current) with list columns
+        $relatedArticles = Article::with([
+            'coverImage:id,article_id,file_url,is_cover',
+            'user:id,full_name,role_id',
+            'category:id,name,slug'
+        ])
+        ->select(self::LIST_COLUMNS)
+        ->where('id', '!=', $article->id)
+        ->where('category_id', $article->category_id)
+        ->whereRaw('LOWER(status) = ?', ['published'])
+        ->where('is_archived', false)
+        ->latest('published_at')
+        ->take(3)
+        ->get();
 
         if ($relatedArticles->count() < 3) {
             $excludeIds = array_merge([$article->id], $relatedArticles->pluck('id')->all());
-            $backfill = Article::with(['coverImage', 'user.role', 'category'])
-                ->whereNotIn('id', $excludeIds)
-                ->whereRaw('LOWER(status) = ?', ['published'])
-                ->where('is_archived', false)
-                ->latest('published_at')
-                ->take(3 - $relatedArticles->count())
-                ->get();
+            $backfill = Article::with([
+                'coverImage:id,article_id,file_url,is_cover',
+                'user:id,full_name,role_id',
+                'category:id,name,slug'
+            ])
+            ->select(self::LIST_COLUMNS)
+            ->whereNotIn('id', $excludeIds)
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false)
+            ->latest('published_at')
+            ->take(3 - $relatedArticles->count())
+            ->get();
             $relatedArticles = $relatedArticles->concat($backfill);
         }
 
@@ -389,9 +467,14 @@ class PublicController extends Controller
         $dateType = (string) $request->query('dateType', 'any');
         $dateValue = (string) $request->query('dateValue', '');
 
-        $articlesQuery = Article::with(['coverImage', 'user.role', 'category'])
-            ->whereRaw('LOWER(status) = ?', ['published'])
-            ->where('is_archived', false);
+        $articlesQuery = Article::with([
+            'coverImage:id,article_id,file_url,is_cover',
+            'user:id,full_name,role_id',
+            'category:id,name,slug'
+        ])
+        ->select(self::LIST_COLUMNS)
+        ->whereRaw('LOWER(status) = ?', ['published'])
+        ->where('is_archived', false);
 
         if ($categoryParam !== 'All' && !empty($categoryParam)) {
             $articlesQuery->whereHas('category', function ($q) use ($categoryParam) {
@@ -426,7 +509,9 @@ class PublicController extends Controller
         };
 
         $articles = $articlesQuery->paginate(12)->withQueryString();
-        $categories = Category::select(['id', 'name', 'slug'])->get();
+        $categories = Cache::remember('public_categories_all', 600, function () {
+            return Category::select(['id', 'name', 'slug'])->get();
+        });
 
         return view('archives', compact(
             'articles',
@@ -466,12 +551,16 @@ class PublicController extends Controller
             ]);
         }
 
-        $articles = Article::with(['coverImage', 'category'])
-            ->where('user_id', $user->id)
-            ->whereRaw('LOWER(status) = ?', ['published'])
-            ->where('is_archived', false)
-            ->latest('published_at')
-            ->get();
+        $articles = Article::with([
+            'coverImage:id,article_id,file_url,is_cover',
+            'category:id,name,slug'
+        ])
+        ->select(self::LIST_COLUMNS)
+        ->where('user_id', $user->id)
+        ->whereRaw('LOWER(status) = ?', ['published'])
+        ->where('is_archived', false)
+        ->latest('published_at')
+        ->get();
 
         $roleName = $user->role->role_name ?? 'Staff Contributor';
         $totalViews = (int) $articles->sum('views');
@@ -488,7 +577,7 @@ class PublicController extends Controller
             'totalViews' => $totalViews,
             'beats' => $beats,
             'beatsWithCount' => $beatsWithCount,
-            'latestArticleDate' => $latestArticleDate,
+            'latestArticleDate' => $latestArticleDate ? $latestArticleDate->format('M d, Y') : null,
         ]);
     }
 
@@ -501,6 +590,14 @@ class PublicController extends Controller
     }
 
     /**
+     * Display the Members / Editorial Board directory page.
+     */
+    public function members(): View
+    {
+        return view('members');
+    }
+
+    /**
      * Display the Feedback form page.
      */
     public function feedback(): View
@@ -509,38 +606,20 @@ class PublicController extends Controller
     }
 
     /**
-     * Store feedback from the public reader form.
+     * Handle Feedback form submission.
      */
-    public function submitFeedback(Request $request): JsonResponse|RedirectResponse
+    public function submitFeedback(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'name' => 'nullable|string|max:80',
-            'subject' => 'required|string|max:120',
-            'message' => 'required|string|max:3000',
+            'name' => 'nullable|string|max:100',
+            'email' => 'nullable|email|max:150',
+            'category' => 'required|string|in:general,editorial,bug,suggestion,other',
+            'message' => 'required|string|max:2000',
         ]);
 
-        Feedback::create([
-            'name' => $validated['name'] ?? 'Anonymous Reader',
-            'subject' => $validated['subject'],
-            'message' => $validated['message'],
-            'is_read' => false,
-        ]);
+        Feedback::create($validated);
 
-        if ($request->expectsJson() || $request->ajax()) {
-            return response()->json([
-                'success' => true,
-                'message' => 'Your feedback has been received. Thank you for reading The Lens!',
-            ]);
-        }
-
-        return redirect()->route('public.feedback')->with('success', 'Your feedback has been received. Thank you for reading The Lens!');
-    }
-
-    /**
-     * Display the Members directory page.
-     */
-    public function members(): View
-    {
-        return view('members');
+        return redirect()->route('public.feedback')
+            ->with('success', 'Thank you! Your feedback has been submitted successfully.');
     }
 }

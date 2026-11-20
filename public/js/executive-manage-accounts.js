@@ -547,7 +547,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    if (btnOpenAddModal) btnOpenAddModal.addEventListener('click', openAddModal);
+    if (btnOpenAddModal) {
+        btnOpenAddModal.addEventListener('click', () => {
+            openAddModal();
+            const studentIdInput = document.getElementById('officer-input-student-id');
+            if (studentIdInput && !studentIdInput.dataset.boundFormat) {
+                studentIdInput.dataset.boundFormat = 'true';
+                studentIdInput.addEventListener('input', (e) => {
+                    let val = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+                    let formatted = '';
+                    if (val.length > 0) formatted += val.substring(0, 4);
+                    if (val.length > 4) formatted += '-' + val.substring(4, 9);
+                    if (val.length > 9) formatted += '-' + val.substring(9, 11);
+                    if (val.length > 11) formatted += '-' + val.substring(11, 12);
+                    e.target.value = formatted;
+                });
+            }
+        });
+    }
     if (btnCloseAddModal) btnCloseAddModal.addEventListener('click', closeAddModal);
 
     // Close modals on overlay backdrop click
@@ -578,16 +595,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const nameInput = document.getElementById('officer-input-name');
             const roleSelect = document.getElementById('officer-input-role');
 
-            const studentNumber = studentIdInput ? studentIdInput.value.trim() : '';
+            const studentNumber = studentIdInput ? studentIdInput.value.trim().toUpperCase() : '';
             const name = nameInput ? nameInput.value.trim() : '';
             const role = roleSelect ? roleSelect.value : '';
             const roleId = roleSelect?.selectedOptions?.[0]?.dataset?.id || null;
 
             let hasError = false;
 
-            if (!studentNumber || studentNumber.length < 4) {
+            const STUDENT_NUMBER_REGEX = /^\d{4}-\d{5}-BN-0$/;
+            if (!studentNumber) {
                 hasError = true;
                 if (studentIdInput) studentIdInput.classList.add('input-invalid');
+                showToast('Student number is required.', 'warning');
+                return;
+            } else if (!STUDENT_NUMBER_REGEX.test(studentNumber)) {
+                hasError = true;
+                if (studentIdInput) studentIdInput.classList.add('input-invalid');
+                showToast('Student number format must be YEAR-5DIGIT-BN-0 (e.g. 2024-00010-BN-0).', 'warning');
+                return;
             } else if (studentIdInput) {
                 studentIdInput.classList.remove('input-invalid');
             }

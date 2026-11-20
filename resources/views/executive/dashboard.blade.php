@@ -58,16 +58,19 @@
             <!-- Section 1: Pending Approval (Above Activity Log, Simplified Table on Mobile) -->
             <section class="card-panel animate-fade-in delay-2" aria-labelledby="pending-approval-heading">
                 <div class="panel-header">
-                    <h2 id="pending-approval-heading" class="panel-title">Pending Approval</h2>
+                    <div class="panel-title-group">
+                        <h2 id="pending-approval-heading" class="panel-title">Pending Approval</h2>
+                        <span class="panel-count-badge" title="Total pending submissions across section">{{ $metrics['pending'] ?? count($pendingArticles ?? []) }}</span>
+                    </div>
                     <a href="{{ request()->is('section-head*') ? route('section-head.review-articles') : route('executive.review-articles') }}" class="panel-action-link">View all &rarr;</a>
                 </div>
                 
                 <div class="table-responsive">
-                    <table class="data-table">
+                    <table class="data-table pending-approvals-table">
                         <thead>
                             <tr>
                                 <th>Article Title</th>
-                                <th class="hide-on-mobile">Section</th>
+                                <th class="hide-on-mobile">Category</th>
                                 <th>Status</th>
                                 <th class="hide-on-mobile">Date</th>
                                 <th class="text-right">Action</th>
@@ -78,20 +81,24 @@
                                 <tr>
                                     <td>
                                         <div class="table-article-info">
-                                            <button type="button" class="table-article-btn" data-action="view" data-id="{{ $art['id'] }}" data-article="{{ json_encode($art) }}" title="{{ $art['title'] }}">
+                                            <button type="button" class="table-article-btn" data-action="view" data-id="{{ $art['id'] }}" data-article="{{ json_encode($art) }}" title="{{ $art['title'] }}" style="font-family: 'Playfair Display', Georgia, serif !important;">
                                                 {{ $art['title'] }}
                                             </button>
                                             <div class="table-author-subline">
                                                 <i class="fa-solid fa-pen-nib"></i>
-                                                <span>{{ $art['author'] ?? 'Author' }}</span>
+                                                <span>By <strong>{{ $art['author'] ?? 'Author' }}</strong></span>
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="hide-on-mobile"><span class="table-section-tag">{{ $art['category'] ?? 'General' }}</span></td>
-                                    <td><span class="status-badge status-review">Pending</span></td>
+                                    <td class="hide-on-mobile">
+                                        <span class="table-section-tag" title="{{ $art['category'] ?? 'General' }}">{{ $art['category'] ?? 'General' }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge status-review">Pending</span>
+                                    </td>
                                     <td class="hide-on-mobile"><span class="table-date">{{ $art['date'] ?? '' }}</span></td>
                                     <td class="text-right">
-                                        <a href="{{ request()->is('section-head*') ? route('section-head.review-articles', ['id' => $art['id']]) : route('executive.review-articles', ['id' => $art['id']]) }}" class="table-manage-btn" title="Review Article">
+                                        <a href="{{ route('executive.review-articles', ['id' => $art['id']]) }}" class="table-manage-btn" title="Review Article">
                                             Manage
                                         </a>
                                     </td>
@@ -109,7 +116,7 @@
             <!-- Section 2: Activity Log (Top 5 Recent with View All) -->
             <section class="card-panel animate-fade-in delay-3" aria-labelledby="activity-log-heading">
                 <div class="panel-header">
-                    <h2 id="activity-log-heading" class="panel-title">Activity Log</h2>
+                    <h2 id="activity-log-heading" class="panel-title" style="font-family: 'Playfair Display', Georgia, serif !important;">Activity Log</h2>
                     <a href="{{ url((request()->is('section-head*') ? 'section-head' : 'executive') . '/activity-logs') }}" class="panel-action-link">View all &rarr;</a>
                 </div>
                 <div id="recent-activity-list" class="activity-timeline">
@@ -125,7 +132,7 @@
             <!-- Section 1: Most Viewed Articles (Current month with eye & share icons) -->
             <section class="card-panel animate-fade-in delay-2" aria-labelledby="most-viewed-heading">
                 <div class="panel-header">
-                    <h2 id="most-viewed-heading" class="panel-title">Most Viewed Articles</h2>
+                    <h2 id="most-viewed-heading" class="panel-title" style="font-family: 'Playfair Display', Georgia, serif !important;">Most Viewed Articles</h2>
                     <span id="most-viewed-month-badge" class="panel-badge">{{ date('F') }}</span>
                 </div>
                 <div id="most-viewed-list" class="ranked-list">
@@ -156,21 +163,28 @@
             <!-- Section 2: Top Performing Journalists (Table Layout) -->
             <section class="card-panel animate-fade-in delay-3" aria-labelledby="top-journalists-heading">
                 <div class="panel-header">
-                    <h2 id="top-journalists-heading" class="panel-title">Top Performing Journalists</h2>
+                    <h2 id="top-journalists-heading" class="panel-title" style="font-family: 'Playfair Display', Georgia, serif !important;">Top Performing Journalists</h2>
                     <span class="panel-badge">Leaderboard</span>
                 </div>
                 <div class="journalists-table-wrap">
-                    <table class="journalists-table">
+                    <table class="data-table journalists-table">
                         <thead>
                             <tr>
                                 <th class="col-author">Author</th>
-                                <th class="col-article-count">Article Count</th>
+                                <th class="col-article-count">Published Articles</th>
                             </tr>
                         </thead>
                         <tbody id="top-journalists-table-body">
-                            <tr>
-                                <td colspan="2" class="empty-state-cell" style="font-size: 0.85rem; color: #667085; text-align: center; padding: 24px 0; border-bottom: none; pointer-events: none; background: transparent;">No journalists yet.</td>
-                            </tr>
+                            @forelse($topJournalists ?? [] as $j)
+                                <tr>
+                                    <td class="col-author"><span class="author-name">{{ $j['name'] }}</span></td>
+                                    <td class="col-article-count"><span class="article-count-pill">{{ $j['article_count'] ?? $j['count'] }}</span></td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="2" class="empty-state-cell" style="font-size: 0.85rem; color: #667085; text-align: center; padding: 24px 0; border-bottom: none; pointer-events: none; background: transparent;">No journalists yet.</td>
+                                </tr>
+                            @endforelse
                         </tbody>
                     </table>
                 </div>

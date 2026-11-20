@@ -13,37 +13,231 @@ class SectionHeadController extends ExecutiveController
 {
     public function dashboard()
     {
-        return parent::dashboard();
+        $request = request();
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $user?->loadMissing('role');
+        $userRole = $user?->role?->role_name ?? 'Section Head';
+        $category = $this->getCategoryForUser($user);
+
+        // Fetch metrics for Section Head
+        $query = Article::query();
+        if ($category) {
+            $query->where('category_id', $category->id);
+        }
+
+        $userId = Auth::id() ?? 0;
+        $catKey = $category->id ?? 'all';
+        $statsCacheKey = "section_head_dashboard_stats_{$userId}_{$catKey}";
+
+        $stats = Cache::remember($statsCacheKey, 300, function () use ($query, $userId) {
+            return (clone $query)->selectRaw("
+                COALESCE(SUM(views), 0) as total_views,
+                COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
+                COUNT(CASE WHEN (status IN ('Pending Head Review', 'Pending Review')) AND user_id != {$userId} THEN 1 END) as pending
+            ")->first();
+        });
+
+        $activeMembers = Cache::remember('active_members_count', 300, function () {
+            return \App\Models\User::where(function ($q) {
+                $q->where('account_status', 'active')
+                  ->orWhere('account_status', '!=', 'deactivated')
+                  ->orWhereNull('account_status');
+            })->count();
+        });
+
+        $metrics = [
+            'total_views' => (int) ($stats->total_views ?? 0),
+            'monthly_views' => (int) ($stats->total_views ?? 0),
+            'published_stories' => (int) ($stats->published_stories ?? 0),
+            'pending' => (int) ($stats->pending ?? 0),
+            'active_members' => $activeMembers,
+        ];
+
+        $pendingCacheKey = "section_head_dashboard_pending_{$userId}_{$catKey}";
+        $pendingArticles = Cache::remember($pendingCacheKey, 300, function () use ($category, $userId) {
+            $submissionsQuery = Article::with(['user.role', 'category:id,name'])
+                ->select(['id', 'title', 'slug', 'category_id', 'user_id', 'content', 'excerpt', 'status', 'views', 'shares', 'created_at'])
+                ->whereIn('status', ['Pending Head Review', 'Pending Review'])
+                ->where('user_id', '!=', $userId);
+            if ($category) {
+                $submissionsQuery->where('category_id', $category->id);
+            }
+            return $submissionsQuery->latest()->take(5)->get()->map(function ($art) {
+                return [
+                    'id' => (string) $art->id,
+                    'title' => $art->title,
+                    'author' => $art->user->full_name ?? 'Author',
+                    'author_avatar' => $art->user?->avatar_url ?? ($art->user?->avatar ? asset($art->user->avatar) : asset('images/member-placeholder.svg')),
+                    'category' => $art->category->name ?? 'General',
+                    'status' => $art->status,
+                    'date' => $art->created_at->format('M d, Y'),
+                    'rawDate' => $art->created_at?->toIso8601String(),
+                    'content' => $art->content,
+                    'excerpt' => $art->excerpt,
+                    'views' => (int) ($art->views ?? 0),
+                    'shares' => (int) ($art->shares ?? 0),
+                ];
+            });
+        });
+
+        $publishedCacheKey = "section_head_dashboard_published_{$catKey}";
+        $publishedArticles = Cache::remember($publishedCacheKey, 300, function () use ($category) {
+            $pubQuery = Article::with(['user.role', 'category:id,name'])
+                ->select(['id', 'title', 'slug', 'category_id', 'user_id', 'content', 'excerpt', 'status', 'views', 'shares', 'created_at'])
+                ->where('status', 'Published');
+            if ($category) {
+                $pubQuery->where('category_id', $category->id);
+            }
+            return $pubQuery->orderByDesc('views')->take(5)->get()->map(function ($art) {
+                return [
+                    'id' => (string) $art->id,
+                    'title' => $art->title,
+                    'author' => $art->user->full_name ?? 'Author',
+                    'author_avatar' => $art->user?->avatar_url ?? ($art->user?->avatar ? asset($art->user->avatar) : asset('images/member-placeholder.svg')),
+                    'category' => $art->category->name ?? 'General',
+                    'status' => $art->status,
+                    'date' => $art->created_at->format('M d, Y'),
+                    'content' => $art->content,
+                    'excerpt' => $art->excerpt,
+                    'views' => (int) ($art->views ?? 0),
+                    'shares' => (int) ($art->shares ?? 0),
+                ];
+            });
+        });
+
+        $activitiesCacheKey = "section_head_dashboard_recent_activities";
+        $recentActivities = Cache::remember($activitiesCacheKey, 300, function () {
+            return ActivityLog::with(['user.role', 'entity'])
+                ->latest()
+                ->take(5)
+                ->get()
+                ->map(fn($log) => $log->formatForTimeline())
+                ->values();
+        });
+
+        // Top Performing Journalists leaderboard
+        $journalistsCacheKey = "section_head_dashboard_journalists_{$catKey}";
+        $topJournalists = Cache::remember($journalistsCacheKey, 300, function () use ($category) {
+            $query = Article::where('status', 'Published');
+            if ($category) {
+                $query->where('category_id', $category->id);
+            }
+            return $query->selectRaw('user_id, COUNT(*) as article_count')
+                ->groupBy('user_id')
+                ->orderByDesc('article_count')
+                ->take(5)
+                ->with('user.role')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => $row->user_id,
+                        'name' => $row->user->full_name ?? 'Author',
+                        'role' => $row->user->role->role_name ?? 'Writer',
+                        'avatar' => $row->user->avatar_url ?? ($row->user->avatar ? asset($row->user->avatar) : asset('images/member-placeholder.svg')),
+                        'article_count' => (int) $row->article_count,
+                    ];
+                });
+        });
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'user' => (new AuthController)->formatUserData($user),
+                'metrics' => $metrics,
+                'pendingArticles' => $pendingArticles,
+                'publishedArticles' => $publishedArticles,
+                'category' => $category?->name,
+                'recentActivities' => $recentActivities,
+                'topJournalists' => $topJournalists,
+            ]);
+        }
+
+        $dashboardData = [
+            'metrics' => $metrics,
+            'pendingArticles' => $pendingArticles,
+            'articles' => $publishedArticles,
+            'category' => $category?->name,
+            'recentActivities' => $recentActivities,
+        ];
+
+        return view('executive.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'category', 'dashboardData', 'recentActivities'));
     }
 
     public function manageMyArticles()
     {
+        $request = request();
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
 
-        $articles = Article::with(['category', 'user.role'])
-            ->where('user_id', Auth::id())
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($article) use ($user) {
-                return [
-                    'id' => $article->id,
-                    'title' => $article->title,
-                    'category' => $article->category->name ?? 'General',
-                    'excerpt' => $article->excerpt,
-                    'content' => $article->content,
-                    'status' => $article->status,
-                    'date' => $article->created_at->format('M d, Y'),
-                    'rawDate' => $article->created_at->toIso8601String(),
-                    'views' => $article->views ?? 0,
-                    'shares' => $article->shares ?? 0,
-                    'remarks' => $article->remarks,
-                    'author' => $user->full_name ?? ($article->user->full_name ?? 'Staff Writer'),
-                ];
-            });
+        $userId = Auth::id();
+        $articles = Cache::remember("section_head_manage_articles_{$userId}", 300, function () use ($user, $userId) {
+            return Article::with(['category:id,name', 'user.role'])
+                ->where('user_id', $userId)
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(function ($article) use ($user) {
+                    $status = $article->status;
+                    $canEdit = ($status === 'Draft' || $status === 'For Revision');
+                    return [
+                        'id' => $article->id,
+                        'title' => $article->title,
+                        'category' => $article->category->name ?? 'General',
+                        'category_id' => $article->category_id,
+                        'excerpt' => $article->excerpt,
+                        'content' => $article->content,
+                        'status' => $article->status,
+                        'date' => $article->created_at->format('M d, Y'),
+                        'rawDate' => $article->created_at->toIso8601String(),
+                        'views' => (int)($article->views ?? 0),
+                        'shares' => (int)($article->shares ?? 0),
+                        'remarks' => $article->remarks,
+                        'author' => $user?->full_name ?? ($article->user->full_name ?? 'Staff Writer'),
+                        'author_avatar' => $user?->avatar_url ?? $article->user?->avatar_url ?? ($article->user?->avatar ? asset($article->user->avatar) : asset('images/member-placeholder.svg')),
+                        'canEdit' => $canEdit,
+                    ];
+                });
+        });
+
+        $totalViews = $articles->where('status', 'Published')->sum('views');
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'user' => (new AuthController)->formatUserData($user),
+                'articles' => $articles,
+                'totalViews' => $totalViews,
+            ]);
+        }
 
         return view('executive.manage-my-articles', compact('articles'));
+    }
+
+    protected function getCategoryForUser($user)
+    {
+        if (!$user) return null;
+        
+        $roleName = (new AuthController)->getUserRoleName($user);
+        if (empty($roleName)) {
+            $user->loadMissing('role');
+            $roleName = $user->role->role_name ?? '';
+        }
+
+        $cachedCategories = Cache::remember('all_categories', 86400, fn() => Category::all());
+
+        if (stripos($roleName, 'News') !== false) {
+            return $cachedCategories->first(fn($c) => stripos($c->name, 'News') !== false);
+        }
+        if (stripos($roleName, 'Literary') !== false || stripos($roleName, 'Literature') !== false) {
+            return $cachedCategories->first(fn($c) => stripos($c->name, 'Liter') !== false);
+        }
+        if (stripos($roleName, 'Feature') !== false) {
+            return $cachedCategories->first(fn($c) => stripos($c->name, 'Feature') !== false);
+        }
+        if (stripos($roleName, 'Science') !== false || stripos($roleName, 'SciTech') !== false) {
+            return $cachedCategories->first(fn($c) => stripos($c->name, 'Science') !== false);
+        }
+
+        return null;
     }
 
     public function reviewArticles(Request $request)
@@ -54,17 +248,20 @@ class SectionHeadController extends ExecutiveController
         $category = $this->getCategoryForUser($user);
 
         $sort = $request->query('sort', 'newest');
-        $catKey = $category->id ?? 'all';
-        $userId = Auth::id();
+        $catKey = $category->id ?? 'general';
+        $userId = Auth::id() ?? 0;
         $cacheKey = "section_head_review_articles_{$userId}_{$catKey}_{$sort}";
 
-        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($category, $sort, $userId) {
-            $query = Article::with(['user.role', 'category'])
-                ->where('status', 'Pending Review')
+        $pendingArticles = Cache::remember($cacheKey, 300, function () use ($category, $sort, $userId) {
+            $query = Article::with(['user:id,full_name,profile_picture_url,role_id', 'category:id,name'])
+                ->whereIn('status', ['Pending Head Review', 'Pending Review'])
                 ->where('user_id', '!=', $userId);
 
+            // STRICT: Section head can only see articles under their assigned section!
             if ($category) {
                 $query->where('category_id', $category->id);
+            } else {
+                $query->whereHas('category', fn($q) => $q->where('name', '!=', 'Opinion'));
             }
 
             if ($sort === 'oldest') {
@@ -75,7 +272,7 @@ class SectionHeadController extends ExecutiveController
 
             return $query->get()->map(function ($article) {
                 return [
-                    'id' => $article->id,
+                    'id' => (string) $article->id,
                     'title' => $article->title,
                     'category' => $article->category->name ?? 'General',
                     'category_id' => $article->category_id,
@@ -85,13 +282,160 @@ class SectionHeadController extends ExecutiveController
                     'date' => $article->created_at->format('M d, Y'),
                     'rawDate' => $article->created_at->toIso8601String(),
                     'author' => $article->user->full_name ?? 'Staff Writer',
-                    'author_avatar' => $article->user->avatar ?? asset('images/member-placeholder.svg'),
+                    'author_avatar' => $article->user?->avatar_url ?? ($article->user?->avatar ? asset($article->user->avatar) : asset('images/member-placeholder.svg')),
                     'remarks' => $article->remarks,
                 ];
             });
         });
 
-        return view('executive.review-articles', compact('pendingArticles', 'category', 'sort'));
+        $revCacheKey = "section_head_revision_articles_{$userId}_{$catKey}_{$sort}";
+        $revisionArticles = Cache::remember($revCacheKey, 300, function () use ($category, $sort, $userId) {
+            $query = Article::with(['user:id,full_name,profile_picture_url,role_id', 'category:id,name'])
+                ->whereIn('status', ['For Head Revision', 'For Section Revision', 'Section Revision']);
+
+            // STRICT: Section head can only see revision articles under their assigned section!
+            if ($category) {
+                $query->where('category_id', $category->id);
+            } else {
+                $query->whereHas('category', fn($q) => $q->where('name', '!=', 'Opinion'));
+            }
+
+            if ($sort === 'oldest') {
+                $query->oldest();
+            } else {
+                $query->latest();
+            }
+
+            return $query->get()->map(function ($article) {
+                return [
+                    'id' => (string) $article->id,
+                    'title' => $article->title,
+                    'category' => $article->category->name ?? 'General',
+                    'category_id' => $article->category_id,
+                    'excerpt' => $article->excerpt,
+                    'content' => $article->content,
+                    'status' => $article->status,
+                    'date' => $article->updated_at ? $article->updated_at->format('M d, Y') : $article->created_at->format('M d, Y'),
+                    'rawDate' => $article->updated_at ? $article->updated_at->toIso8601String() : $article->created_at->toIso8601String(),
+                    'author' => $article->user->full_name ?? 'Staff Writer',
+                    'author_avatar' => $article->user?->avatar_url ?? ($article->user?->avatar ? asset($article->user->avatar) : asset('images/member-placeholder.svg')),
+                    'remarks' => $article->remarks,
+                ];
+            });
+        });
+
+        // Compute category counts for tabs in a single optimized query
+        if ($category) {
+            $count = Article::whereIn('status', ['Pending Head Review', 'Pending Review'])
+                ->where('user_id', '!=', $userId)
+                ->where('category_id', $category->id)
+                ->count();
+
+            $categoriesList = [$category->name];
+            $categoryCounts = [
+                'all' => $count,
+                $category->name => $count,
+            ];
+        } else {
+            $categoryCountsKey = "section_head_review_cat_counts_{$userId}";
+            $categoryCountsData = Cache::remember($categoryCountsKey, 300, function () use ($userId) {
+                $categoriesList = Category::where('name', '!=', 'Opinion')->pluck('name', 'id')->toArray();
+                $countsByCat = Article::whereIn('status', ['Pending Head Review', 'Pending Review'])
+                    ->where('user_id', '!=', $userId)
+                    ->selectRaw('category_id, COUNT(*) as cnt')
+                    ->groupBy('category_id')
+                    ->pluck('cnt', 'category_id')
+                    ->toArray();
+
+                $categoryCounts = [];
+                $totalPending = 0;
+                foreach ($categoriesList as $catId => $catName) {
+                    $catCnt = (int) ($countsByCat[$catId] ?? 0);
+                    $categoryCounts[$catName] = $catCnt;
+                    $totalPending += $catCnt;
+                }
+                $categoryCounts['all'] = $totalPending;
+
+                return [
+                    'list' => array_values($categoriesList),
+                    'counts' => $categoryCounts,
+                ];
+            });
+
+            $categoriesList = $categoryCountsData['list'];
+            $categoryCounts = $categoryCountsData['counts'];
+        }
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'user' => (new AuthController)->formatUserData($user),
+                'pendingArticles' => $pendingArticles,
+                'revisionArticles' => $revisionArticles,
+                'revisionCount' => count($revisionArticles),
+                'category' => $category?->name,
+                'sort' => $sort,
+                'categoryCounts' => $categoryCounts,
+                'categories' => $categoriesList,
+            ]);
+        }
+
+        return view('executive.review-articles', compact('pendingArticles', 'revisionArticles', 'category', 'sort'));
+    }
+
+    public function updateReviewArticle(Request $request, $id)
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'content' => 'required|string',
+            'excerpt' => 'nullable|string|max:1000',
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $user?->loadMissing('role');
+        $category = $this->getCategoryForUser($user);
+
+        $article = Article::with('category')->findOrFail($id);
+
+        // Strict authorization: A section head can only edit articles under their assigned section!
+        if ($category && $article->category_id !== $category->id) {
+            $catName = $category->name;
+            $msg = "Unauthorized: As {$catName} Head, you can only edit manuscripts under the {$catName} section.";
+            if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg,
+                ], 403);
+            }
+            abort(403, $msg);
+        }
+
+        $cleanContent = $this->sanitizeArticleContent($request->content);
+
+        $article->update([
+            'title' => $request->title,
+            'excerpt' => $request->excerpt ?: \Illuminate\Support\Str::limit(strip_tags($cleanContent), 160),
+            'content' => $cleanContent,
+        ]);
+
+        ActivityLog::logAction(Auth::id(), 'edited manuscript', $article);
+
+        $this->clearAllRelatedCaches($article->category_id);
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Article changes saved successfully.',
+                'article' => [
+                    'id' => $article->id,
+                    'title' => $article->title,
+                    'excerpt' => $article->excerpt,
+                    'content' => $article->content,
+                ],
+            ]);
+        }
+
+        return redirect()->back()->with('success', 'Article changes saved successfully.');
     }
 
     public function approveArticle(Request $request, $id)
@@ -99,8 +443,22 @@ class SectionHeadController extends ExecutiveController
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
+        $category = $this->getCategoryForUser($user);
 
-        $article = Article::findOrFail($id);
+        $article = Article::with('category')->findOrFail($id);
+
+        // Strict authorization: A section head can ONLY approve articles under their assigned section!
+        if ($category && $article->category_id !== $category->id) {
+            $catName = $category->name;
+            $msg = "Unauthorized: As {$catName} Head, you can only approve articles under the {$catName} section.";
+            if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg,
+                ], 403);
+            }
+            abort(403, $msg);
+        }
 
         if ($request->filled('title') && $request->filled('content')) {
             $cleanContent = $this->sanitizeArticleContent($request->content);
@@ -120,11 +478,14 @@ class SectionHeadController extends ExecutiveController
 
         $this->clearAllRelatedCaches($article->category_id);
 
-        if ($request->wantsJson() || $request->ajax()) {
-            return response()->json(['success' => true, 'message' => 'Article approved and forwarded to Editor-in-Chief and Executive Desk.']);
+        if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Article approved and forwarded to Editor-in-Chief (EIC).',
+            ]);
         }
 
-        return redirect()->back()->with('success', 'Article approved and forwarded to Editor-in-Chief and Executive Desk.');
+        return redirect()->back()->with('success', 'Article approved and forwarded to Editor-in-Chief.');
     }
 
     public function returnForRevision(Request $request, $id)
@@ -133,9 +494,28 @@ class SectionHeadController extends ExecutiveController
             'remarks' => 'required|string',
         ]);
 
-        $article = Article::findOrFail($id);
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $user?->loadMissing('role');
+        $category = $this->getCategoryForUser($user);
+
+        $article = Article::with('category')->findOrFail($id);
+
+        // Strict authorization: A section head can ONLY return articles under their assigned section!
+        if ($category && $article->category_id !== $category->id) {
+            $catName = $category->name;
+            $msg = "Unauthorized: As {$catName} Head, you can only review articles under the {$catName} section.";
+            if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg,
+                ], 403);
+            }
+            abort(403, $msg);
+        }
+
         $article->update([
-            'status' => 'For Revision',
+            'status' => 'For Writer Revision',
             'remarks' => $request->remarks,
         ]);
 
@@ -143,29 +523,74 @@ class SectionHeadController extends ExecutiveController
 
         $this->clearAllRelatedCaches($article->category_id);
 
-        if ($request->wantsJson() || $request->ajax()) {
-            return response()->json(['success' => true, 'message' => 'Article returned to author with revision remarks.']);
+        if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Article returned to author for writer revision.',
+            ]);
         }
 
-        return redirect()->back()->with('warning', 'Article returned to author with revision remarks.');
+        return redirect()->back()->with('warning', 'Article returned to author for writer revision.');
     }
 
     public function submitArticle(Request $request)
     {
-        $categories = Category::all();
+        $userId = Auth::id();
+        $categories = Cache::remember('all_categories', 86400, fn() => Category::all());
 
-        $drafts = Article::with(['category', 'user.role'])
-            ->where('user_id', Auth::id())
-            ->whereIn('status', ['Draft', 'For Revision'])
-            ->latest()
-            ->get();
+        $drafts = Cache::remember("section_head_drafts_{$userId}", 30, function () use ($userId) {
+            return Article::with(['category', 'user.role'])
+                ->where('user_id', $userId)
+                ->whereIn('status', ['Draft', 'For Revision'])
+                ->latest()
+                ->get()
+                ->map(function ($d) {
+                    return [
+                        'id' => $d->id,
+                        'title' => $d->title,
+                        'category' => $d->category->name ?? 'General',
+                        'category_id' => $d->category_id,
+                        'excerpt' => $d->excerpt,
+                        'content' => $d->content,
+                        'status' => $d->status,
+                        'remarks' => $d->remarks,
+                        'date' => $d->created_at->format('M d, Y'),
+                    ];
+                });
+        });
 
         $editingDraft = null;
         if ($request->has('draft_id')) {
-            $editingDraft = Article::with(['category', 'user.role'])
-                ->where('user_id', Auth::id())
+            $rawDraft = Article::with(['category', 'user.role'])
+                ->where('user_id', $userId)
                 ->whereIn('status', ['Draft', 'For Revision'])
                 ->find($request->draft_id);
+            if ($rawDraft) {
+                $editingDraft = [
+                    'id' => $rawDraft->id,
+                    'title' => $rawDraft->title,
+                    'category' => $rawDraft->category->name ?? 'General',
+                    'category_id' => $rawDraft->category_id,
+                    'excerpt' => $rawDraft->excerpt,
+                    'content' => $rawDraft->content,
+                    'status' => $rawDraft->status,
+                    'remarks' => $rawDraft->remarks,
+                    'date' => $rawDraft->created_at->format('M d, Y'),
+                ];
+            }
+        }
+
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        if ($user) $user->loadMissing('role');
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'user' => (new AuthController)->formatUserData($user),
+                'categories' => $categories,
+                'drafts' => $drafts,
+                'editingDraft' => $editingDraft,
+            ]);
         }
 
         return view('executive.submit-article', compact('categories', 'drafts', 'editingDraft'));
@@ -205,7 +630,7 @@ class SectionHeadController extends ExecutiveController
                         'excerpt' => $request->excerpt,
                         'content' => $cleanContent,
                         'status' => $targetStatus,
-                        'remarks' => null, // Clear past revision remarks upon new submission
+                        'remarks' => null,
                     ]);
 
                     $this->clearAllRelatedCaches($request->category_id);
@@ -214,12 +639,22 @@ class SectionHeadController extends ExecutiveController
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
                     }
 
+                    $msg = $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to Editor-in-Chief for approval.';
+
+                    if ($request->wantsJson() || $request->is('api/*')) {
+                        return response()->json([
+                            'success' => true,
+                            'message' => $msg,
+                            'article' => $article,
+                        ]);
+                    }
+
                     if ($targetStatus === 'Draft') {
                         return redirect()->route('section-head.submit-article', ['tab' => 'drafts'])
                             ->with('success', 'Draft saved successfully.');
                     }
                     return redirect()->route('section-head.manage-my-articles')
-                        ->with('success', 'Article submitted and forwarded to Editor-in-Chief for approval.');
+                        ->with('success', $msg);
                 }
             }
 
@@ -240,24 +675,109 @@ class SectionHeadController extends ExecutiveController
 
             $this->clearAllRelatedCaches($request->category_id);
 
+            $msg = $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to Editor-in-Chief for approval.';
+
+            if ($request->wantsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $msg,
+                    'article' => $createdArticle,
+                ]);
+            }
+
             if ($targetStatus === 'Draft') {
                 return redirect()->route('section-head.submit-article', ['tab' => 'drafts'])
                     ->with('success', 'Draft saved successfully.');
             }
 
             return redirect()->route('section-head.manage-my-articles')
-                ->with('success', 'Article submitted and forwarded to Editor-in-Chief for approval.');
+                ->with('success', $msg);
 
         } catch (\Exception $e) {
+            if ($request->wantsJson() || $request->is('api/*')) {
+                return response()->json(['message' => 'Database Error: ' . $e->getMessage()], 500);
+            }
             return back()->withErrors(['system_error' => 'Database Error: ' . $e->getMessage()])->withInput();
         }
     }
 
+    public function destroyDraft($id)
+    {
+        $draft = Article::where('user_id', Auth::id())
+            ->whereIn('status', ['Draft', 'For Revision'])
+            ->findOrFail($id);
+
+        $categoryId = $draft->category_id;
+        $draft->delete();
+        $this->clearAllRelatedCaches($categoryId);
+
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['success' => true, 'message' => 'Draft deleted successfully.']);
+        }
+
+        return redirect()->route('section-head.submit-article', ['tab' => 'drafts'])->with('success', 'Draft deleted successfully.');
+    }
+
+    public function activityLogs()
+    {
+        $request = request();
+        $query = ActivityLog::with(['user.role', 'entity'])->latest();
+
+        if ($request->filled('search')) {
+            $search = strtolower($request->search);
+            $query->where(function ($q) use ($search) {
+                $q->whereRaw('LOWER(action) LIKE ?', ["%{$search}%"])
+                  ->orWhereHas('user', function ($uq) use ($search) {
+                      $uq->whereRaw('LOWER(full_name) LIKE ?', ["%{$search}%"])
+                        ->orWhereHas('role', function ($rq) use ($search) {
+                            $rq->whereRaw('LOWER(role_name) LIKE ?', ["%{$search}%"]);
+                        });
+                  })
+                  ->orWhereHasMorph('entity', [\App\Models\Article::class], function ($eq) use ($search) {
+                      $eq->whereRaw('LOWER(title) LIKE ?', ["%{$search}%"]);
+                  });
+            });
+        }
+
+        if ($request->filled('date_filter')) {
+            $filter = $request->date_filter;
+            if ($filter === 'today') {
+                $query->whereDate('created_at', now()->toDateString());
+            } elseif ($filter === '7days') {
+                $query->where('created_at', '>=', now()->subDays(7));
+            } elseif ($filter === '30days') {
+                $query->where('created_at', '>=', now()->subDays(30));
+            } elseif ($filter === 'specific' && $request->filled('date')) {
+                $query->whereDate('created_at', $request->date);
+            }
+        }
+
+        $cacheKey = "section_head_activities_" . md5(json_encode($request->all()));
+        $activities = Cache::remember($cacheKey, 15, function () use ($query) {
+            return $query->take(100)->get()->map(fn($log) => $log->formatForTimeline())->values();
+        });
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'activities' => $activities,
+            ]);
+        }
+
+        return view('executive.activity-logs', compact('activities'));
+    }
+
+    public function profileSettings()
+    {
+        return view('executive.profile-settings');
+    }
+
     protected function clearAllRelatedCaches($categoryId = null)
     {
-        $userId = Auth::id();
+        $userId = Auth::id() ?? 0;
         Cache::forget("section_head_dashboard_stats_{$userId}");
         Cache::forget("section_head_recent_articles_{$userId}");
+        Cache::forget("section_head_manage_articles_{$userId}");
+        Cache::forget("section_head_drafts_{$userId}");
         Cache::forget("executive_dashboard_stats_{$userId}");
         Cache::forget("executive_dashboard_stats_all");
         Cache::forget("executive_dashboard_stats_pres_vp");
@@ -276,33 +796,26 @@ class SectionHeadController extends ExecutiveController
             Cache::forget("exec_review_articles_{$categoryId}_oldest");
             Cache::forget("section_head_review_articles_{$userId}_{$categoryId}_newest");
             Cache::forget("section_head_review_articles_{$userId}_{$categoryId}_oldest");
+            Cache::forget("section_head_revision_articles_{$userId}_{$categoryId}_newest");
+            Cache::forget("section_head_revision_articles_{$userId}_{$categoryId}_oldest");
+            Cache::forget("section_head_dashboard_stats_{$userId}_{$categoryId}");
+            Cache::forget("section_head_dashboard_pending_{$userId}_{$categoryId}");
+            Cache::forget("section_head_dashboard_published_{$categoryId}");
+            Cache::forget("section_head_dashboard_journalists_{$categoryId}");
         }
-    }
-
-    public function activityLogs()
-    {
-        return parent::activityLogs();
-    }
-
-    public function profileSettings()
-    {
-        return view('executive.profile-settings');
+        Cache::forget("section_head_review_articles_{$userId}_all_newest");
+        Cache::forget("section_head_review_articles_{$userId}_all_oldest");
+        Cache::forget("section_head_revision_articles_{$userId}_all_newest");
+        Cache::forget("section_head_revision_articles_{$userId}_all_oldest");
+        Cache::forget("section_head_review_cat_counts_{$userId}");
+        Cache::forget("section_head_dashboard_stats_{$userId}_all");
+        Cache::forget("section_head_dashboard_pending_{$userId}_all");
+        Cache::forget("section_head_dashboard_published_all");
+        Cache::forget("section_head_dashboard_journalists_all");
     }
 
     protected function sanitizeArticleContent($content)
     {
-        if (!$content) return '';
-
-        $decoded = html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        while (($nextDecoded = html_entity_decode($decoded, ENT_QUOTES | ENT_HTML5, 'UTF-8')) !== $decoded) {
-            $decoded = $nextDecoded;
-        }
-
-        $sanitized = preg_replace('/<\/?span[^>]*>/i', '', $decoded);
-        $sanitized = preg_replace('/\s*style\s*=\s*("[^"]*"|\'[^\']*\')/i', '', $sanitized);
-        $sanitized = preg_replace('/\s*class\s*=\s*("[^"]*"|\'[^\']*\')/i', '', $sanitized);
-
-        return trim($sanitized);
+        return Article::cleanArticleBodyText($content);
     }
 }
-

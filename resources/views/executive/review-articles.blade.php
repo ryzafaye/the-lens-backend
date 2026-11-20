@@ -21,8 +21,8 @@
                 </label>
                 <div class="sort-select-wrapper">
                     <select id="review-sort-select" class="review-sort-select" aria-label="Sort pending articles by date">
-                        <option value="newest" selected>Newest First</option>
-                        <option value="oldest">Oldest First</option>
+                        <option value="newest" selected>Newest</option>
+                        <option value="oldest">Oldest</option>
                     </select>
                     <i class="fa-solid fa-chevron-down sort-chevron" aria-hidden="true"></i>
                 </div>

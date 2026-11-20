@@ -201,14 +201,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasHtmlTags = /<\/?(?:div|p|br|h[1-6]|blockquote|ul|ol|li|strong|b|em|i|u|s|a|hr)[^>]*>/i.test(content);
 
         if (hasHtmlTags) {
-            // Convert <p> tags to <div> with canonical <div><br></div> paragraph separators
+            // Standardize <p> to <div> without injecting artificial extra blank line breaks
             content = content
-                .replace(/<\/p>\s*<p[^>]*>/gi, '</div><div><br></div><div>')
                 .replace(/<p[^>]*>/gi, '<div>')
                 .replace(/<\/p>/gi, '</div>');
 
-            // Collapse multiple consecutive blank line divs into a single standard break
-            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){2,}/gi, '<div><br></div>');
+            // Collapse excessive consecutive blank lines (3 or more) to a single break
+            content = content.replace(/(?:<div>\s*(?:<br\s*\/?>)?\s*<\/div>\s*){3,}/gi, '<div><br></div>');
 
             // Remove leading and trailing empty lines
             content = content
@@ -218,17 +217,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return content;
         }
 
-        // 6. Plain-text fallback: split into paragraphs and map to canonical block elements
-        const paragraphs = content
-            .split(/\r?\n\r?\n+/)
-            .map(p => p.trim())
-            .filter(p => p.length > 0);
-
-        if (paragraphs.length === 0) {
-            return '<p style="color: #98a2b3; font-style: italic;">No content available for this manuscript.</p>';
-        }
-
-        return paragraphs.map(p => `<div>${escapeHTML(p).replace(/\r?\n/g, '<br>')}</div>`).join('<div><br></div>');
+        // 6. Plain-text fallback: preserve exact line and paragraph spacing (cursor height)
+        const lines = content.split(/\r?\n/);
+        return lines.map(line => {
+            const trimmed = line.trim();
+            return trimmed ? `<div>${escapeHTML(trimmed)}</div>` : '<div><br></div>';
+        }).join('');
     }
 
     function showToast(message, type = 'success') {
@@ -933,15 +927,45 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${minutes} min read`;
     }
 
+    function normalizeCategoryForEdit(cat) {
+        if (!cat) return 'News';
+        const c = String(cat).trim().toLowerCase();
+        if (c.includes('sci') || c.includes('tech')) return 'Science & Technology';
+        if (c.includes('feat')) return 'Feature';
+        if (c.includes('opin')) return 'Opinion';
+        if (c.includes('lit')) return 'Literature';
+        if (c.includes('news')) return 'News';
+        return cat;
+    }
+
+    function cleanContentForEdit(content) {
+        if (!content) return '';
+        let s = String(content)
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(?:div|p|h[1-6]|li|blockquote)>\s*<(?:div|p|h[1-6]|li|blockquote)[^>]*>/gi, '\n')
+            .replace(/<(?:div|p|h[1-6]|li|blockquote)[^>]*>/gi, '')
+            .replace(/<\/(?:div|p|h[1-6]|li|blockquote)>/gi, '\n')
+            .replace(/<[^>]+>/g, '')
+            .replace(/&lt;\/?(?:div|p|br)[^&gt;]*&gt;/gi, '')
+            .replace(/<\/?(?:div|p|br)[^>]*>/gi, '')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#0?39;/g, "'");
+        return s.replace(/\r?\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    }
+
     function openEditModal(id) {
         const article = articles.find(a => String(a.id) === String(id));
         if (!article || !editModal) return;
 
         if (editArticleIdInput) editArticleIdInput.value = article.id;
         if (editTitleInput) editTitleInput.value = article.title || '';
-        if (editCategorySelect) editCategorySelect.value = article.category || 'News';
+        if (editCategorySelect) editCategorySelect.value = normalizeCategoryForEdit(article.category);
         if (editExcerptInput) editExcerptInput.value = article.excerpt || '';
-        if (editBodyInput) editBodyInput.value = article.content || article.excerpt || '';
+        if (editBodyInput) editBodyInput.value = cleanContentForEdit(article.content || article.excerpt || '');
 
         const computedReadTime = calculateReadingTime(editBodyInput ? editBodyInput.value : article.content);
         if (editReadtimeText) editReadtimeText.textContent = computedReadTime;
