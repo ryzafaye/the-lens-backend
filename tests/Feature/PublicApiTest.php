@@ -209,4 +209,18 @@ class PublicApiTest extends TestCase
         $pagesResponse->assertOk()
             ->assertJsonPath('status', 'ok');
     }
+
+    public function test_cors_allows_configured_frontend_url_and_supports_credentials(): void
+    {
+        config(['cors.allowed_origins' => array_merge(config('cors.allowed_origins', []), ['https://the-lens.vercel.app'])]);
+
+        $response = $this->withHeaders([
+            'Origin' => 'https://the-lens.vercel.app',
+            'Access-Control-Request-Method' => 'GET',
+        ])->optionsJson('/api/public/home');
+
+        $response->assertStatus(204)
+            ->assertHeader('Access-Control-Allow-Origin', 'https://the-lens.vercel.app')
+            ->assertHeader('Access-Control-Allow-Credentials', 'true');
+    }
 }
