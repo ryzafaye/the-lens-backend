@@ -51,7 +51,7 @@ class MpcController extends Controller
         ];
 
         $pendingArticles = Cache::remember('mpc_dashboard_pending_articles', 30, function () {
-            return Article::with(['user.role', 'category'])
+            return Article::with(['user.role', 'category', 'coverImage'])
                 ->whereIn('status', ['Approved', 'Ready to Publish'])
                 ->latest('updated_at')
                 ->take(5)
@@ -61,12 +61,15 @@ class MpcController extends Controller
                         'id' => $art->id,
                         'title' => $art->title,
                         'author' => $art->user->full_name ?? 'Author',
+                        'author_avatar' => $art->user->profile_picture_url ?? '/images/member-placeholder.svg',
                         'category' => $art->category->name ?? 'General',
                         'status' => 'Ready to Publish',
                         'date' => $art->updated_at ? $art->updated_at->format('M d, Y') : ($art->created_at ? $art->created_at->format('M d, Y') : date('M d, Y')),
                         'dateApproved' => $art->updated_at ? $art->updated_at->format('M d, Y') : ($art->created_at ? $art->created_at->format('M d, Y') : date('M d, Y')),
                         'content' => $art->content,
                         'excerpt' => $art->excerpt ?: Str::limit(strip_tags($art->content ?? ''), 120),
+                        'coverImage' => $art->coverImage?->file_url ?? '',
+                        'assignedCoverId' => $art->coverImage ? (string) $art->coverImage->id : '',
                     ];
                 });
         });
@@ -98,7 +101,48 @@ class MpcController extends Controller
             ->get()
             ->map->formatForTimeline();
 
-        return view('mpc.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'recentActivities'));
+        $topJournalists = Cache::remember('mpc_dashboard_top_journalists', 60, function () {
+            return Article::where('status', 'Published')
+                ->selectRaw('user_id, COUNT(*) as article_count')
+                ->groupBy('user_id')
+                ->orderByDesc('article_count')
+                ->take(5)
+                ->with('user.role')
+                ->get()
+                ->map(function ($row) {
+                    return [
+                        'id' => $row->user_id,
+                        'name' => $row->user->full_name ?? 'Author',
+                        'role' => $row->user->role->role_name ?? 'Writer',
+                        'article_count' => (int) $row->article_count,
+                        'count' => (int) $row->article_count,
+                        'avatar' => $row->user->profile_picture_url ?? '/images/member-placeholder.svg',
+                    ];
+                });
+        });
+
+        $approvedCovers = ArticleImage::approved()
+            ->with(['uploader.role'])
+            ->latest()
+            ->take(30)
+            ->get()
+            ->map(fn($item) => $this->imageService->formatForView($item))
+            ->values()
+            ->all();
+
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json([
+                'user' => (new AuthController)->formatUserData($user),
+                'metrics' => $metrics,
+                'pendingArticles' => $pendingArticles,
+                'publishedArticles' => $publishedArticles,
+                'recentActivities' => $recentActivities,
+                'topJournalists' => $topJournalists,
+                'approvedCovers' => $approvedCovers,
+            ]);
+        }
+
+        return view('mpc.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'recentActivities', 'topJournalists', 'approvedCovers'));
     }
 
     public function publishArticle()
@@ -173,6 +217,18 @@ class MpcController extends Controller
         // Also alias $approvedArticles for full view compatibility
         $approvedArticles = $articles;
 
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json([
+                'articles' => $articles,
+                'approvedArticles' => $approvedArticles,
+                'approvedCovers' => $approvedCovers,
+                'readyCount' => $readyCount,
+                'publishedCount' => $publishedCount,
+                'unpublishedCount' => $unpublishedCount,
+                'coversCount' => $coversCount,
+            ]);
+        }
+
         return view('mpc.publish-article', compact(
             'articles',
             'approvedArticles',
@@ -200,6 +256,10 @@ class MpcController extends Controller
             ->map(fn($item) => $this->imageService->formatForView($item))
             ->values()
             ->all();
+
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['coverList' => $coverList]);
+        }
 
         return view('mpc.media-desk', compact('coverList'));
     }
@@ -248,6 +308,54 @@ class MpcController extends Controller
         return redirect()->back()->with('success', 'Visual asset returned for revision.');
     }
 
+    /**
+     * Resubmit Media asset returned for revision
+     */
+    public function resubmitMedia(int|string $id, Request $request): JsonResponse|RedirectResponse
+    {
+        $request->validate([
+            'media_file' => 'nullable|image|mimes:svg,png,jpg,jpeg,webp|max:10240',
+            'image' => 'nullable|string',
+            'title' => 'nullable|string|max:255',
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $image = ArticleImage::findOrFail($id);
+
+        if ($image->uploader_id !== $user->id && !str_contains(strtolower($user->role?->role_name ?? ''), 'head')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized to resubmit this media.'], 403);
+        }
+
+        $lowerStatus = strtolower(trim((string)$image->status));
+        $isRevision = in_array($lowerStatus, ['revision', 'for revision', 'returned for revision', 'returned'])
+            || stripos($lowerStatus, 'revision') !== false;
+
+        if (!$isRevision) {
+            return response()->json(['success' => false, 'message' => 'This media asset is not currently returned for revision.'], 422);
+        }
+
+        $fileOrData = null;
+        if ($request->hasFile('media_file')) {
+            $fileOrData = $request->file('media_file');
+        } elseif ($request->filled('image')) {
+            $fileOrData = $request->input('image');
+        }
+
+        $this->imageService->resubmitImage($image, $user, $fileOrData, $request->input('title'));
+        ActivityLog::logAction($user->id, 'submitted media');
+
+        if ($request->wantsJson() || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Media asset resubmitted successfully to Editor-in-Chief!',
+                'media' => $this->imageService->formatForView($image),
+            ]);
+        }
+
+        return redirect()->route('mpc.manage-media')->with('success', 'Media asset resubmitted successfully!');
+    }
+
     public function submitMedia()
     {
         return view('mpc.submit-media');
@@ -277,10 +385,16 @@ class MpcController extends Controller
                 $user,
                 $fileOrData,
                 $request->input('type') ?: 'photo',
-                $request->input('title'),
-                $request->input('caption')
+                $request->input('title')
             );
             ActivityLog::logAction($user->id, 'submitted media');
+        }
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Media submitted successfully.',
+            ]);
         }
 
         return redirect()->route('mpc.manage-media')->with('success', 'Media submitted successfully.');
@@ -288,13 +402,26 @@ class MpcController extends Controller
 
     public function manageMedia()
     {
-        $mediaItems = ArticleImage::whereIn('image_type', ['photo', 'graphic'])
-            ->with(['uploader.role', 'headApprover.role', 'eicApprover.role', 'article'])
-            ->latest()
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+
+        $query = ArticleImage::whereIn('image_type', ['photo', 'graphic'])
+            ->with(['uploader.role', 'headApprover.role', 'eicApprover.role', 'article']);
+
+        // Manage My Media is strictly scoped to the authenticated owner's submissions
+        if ($user) {
+            $query->where('uploader_id', $user->id);
+        }
+
+        $mediaItems = $query->latest()
             ->get()
             ->map(fn($item) => $this->imageService->formatForView($item))
             ->values()
             ->all();
+
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['mediaItems' => $mediaItems]);
+        }
 
         return view('mpc.manage-media', compact('mediaItems'));
     }
@@ -326,6 +453,10 @@ class MpcController extends Controller
                 ];
             });
 
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json($articles);
+        }
+
         return view('mpc.manage-my-articles', compact('articles'));
     }
 
@@ -346,6 +477,14 @@ class MpcController extends Controller
                 ->where('user_id', Auth::id())
                 ->whereIn('status', ['Draft', 'For Revision'])
                 ->find($draftId);
+        }
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'categories' => $categories,
+                'drafts' => $drafts,
+                'editingDraft' => $editingDraft,
+            ]);
         }
 
         return view('mpc.submit-article', compact('categories', 'drafts', 'editingDraft'));
@@ -378,12 +517,27 @@ class MpcController extends Controller
                 ->where('user_id', Auth::id())
                 ->firstOrFail();
 
+            $isRevision = in_array(strtolower(trim((string)$article->status)), [
+                'for revision', 'for writer revision', 'for head revision',
+                'for section head revision', 'returned for revision', 'revision',
+            ]) || stripos((string)$article->status, 'revision') !== false;
+
+            if ($isRevision && $status !== 'Draft') {
+                if (!Article::isBodyModified($article->content, $validated['content'] ?? '')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You cannot submit an article returned for revision without editing the article body. Please revise the manuscript before submitting.',
+                    ], 422);
+                }
+            }
+
             $article->update([
                 'title' => $validated['title'],
                 'category_id' => $validated['category_id'],
                 'content' => $validated['content'] ?? '',
                 'excerpt' => substr(strip_tags($validated['content'] ?? ''), 0, 150),
                 'status' => $status,
+                'remarks' => null,
             ]);
 
             if ($status === 'Pending Review') {
@@ -406,6 +560,14 @@ class MpcController extends Controller
             }
         }
 
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Article saved successfully.',
+                'article' => $article,
+            ]);
+        }
+
         return redirect()->route('mpc.manage-my-articles')->with('success', 'Article saved successfully.');
     }
 
@@ -418,6 +580,13 @@ class MpcController extends Controller
 
         $draft->delete();
 
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Draft deleted successfully.',
+            ]);
+        }
+
         return redirect()->back()->with('success', 'Draft deleted successfully.');
     }
 
@@ -429,12 +598,20 @@ class MpcController extends Controller
             ->get()
             ->map->formatForTimeline();
 
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['activities' => $activities]);
+        }
+
         return view('mpc.activity-logs', compact('activities'));
     }
 
-    public function transparency()
+    public function transparency(Request $request)
     {
-        return view('mpc.transparency');
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['status' => 'ok']);
+        }
+
+        return response()->json(['status' => 'ok']);
     }
 
     public function assignCover(Request $request, $id)
@@ -539,6 +716,10 @@ class MpcController extends Controller
 
     public function profileSettings()
     {
+        if (request()->wantsJson() || request()->is('api/*')) {
+            return response()->json(['user' => (new AuthController)->formatUserData(Auth::user())]);
+        }
+
         return view('mpc.profile-settings');
     }
 

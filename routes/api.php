@@ -7,6 +7,9 @@ use App\Http\Controllers\WriterController;
 use App\Http\Controllers\SectionHeadController;
 use App\Http\Controllers\EicController;
 use App\Http\Controllers\ExecutiveController;
+use App\Http\Controllers\MpcController;
+use App\Http\Controllers\MediaController;
+use App\Http\Controllers\CartoonistController;
 use App\Http\Controllers\ProfileController;
 
 /*
@@ -46,6 +49,7 @@ Route::get('pages/dashboard', [AuthController::class, 'dashboardPage'])->middlew
 
 // Writer Portal endpoints (authenticated via web session)
 Route::middleware(['web', 'auth'])->group(function () {
+    Route::post('articles/{id}/resubmit', [SectionHeadController::class, 'resubmitArticle']);
     Route::get('writer/dashboard', [WriterController::class, 'dashboard']);
     Route::get('writer/submit-article', [WriterController::class, 'submitArticle']);
     Route::post('writer/submit-article', [WriterController::class, 'storeArticle']);
@@ -118,11 +122,84 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('executive/feedback', [ExecutiveController::class, 'feedbackInbox']);
     Route::get('executive/transparency', [ExecutiveController::class, 'transparency']);
     Route::get('executive/profile-settings', [ExecutiveController::class, 'profileSettings']);
+
+    // Media & Public Communications (M&PC) Portal endpoints
+    Route::middleware(['role:Media and Public Communications Head,Associate Media and Public Communications Head,M&PC Head,Associate M&PC Head'])->group(function () {
+        Route::get('mpc/dashboard', [MpcController::class, 'dashboard']);
+        Route::get('mpc/publish-article', [MpcController::class, 'publishArticle']);
+        Route::post('mpc/articles/{id}/publish', [MpcController::class, 'publishArticleRelease']);
+        Route::post('mpc/articles/{id}/unpublish', [MpcController::class, 'unpublishArticleRelease']);
+        Route::post('mpc/articles/{id}/assign-cover', [MpcController::class, 'assignCover']);
+        Route::post('mpc/articles/{id}/revision', [MpcController::class, 'returnArticleForRevision']);
+        Route::get('mpc/media-desk', [MpcController::class, 'mediaDesk']);
+        Route::post('mpc/media/{id}/endorse', [MpcController::class, 'endorseMedia']);
+        Route::post('mpc/media/{id}/revision', [MpcController::class, 'returnMediaForRevision']);
+        Route::post('mpc/media/{id}/resubmit', [MpcController::class, 'resubmitMedia']);
+        Route::get('mpc/submit-media', [MpcController::class, 'submitMedia']);
+        Route::post('mpc/submit-media', [MpcController::class, 'storeMedia']);
+        Route::get('mpc/manage-media', [MpcController::class, 'manageMedia']);
+        Route::get('mpc/manage-my-articles', [MpcController::class, 'manageMyArticles']);
+        Route::get('mpc/submit-article', [MpcController::class, 'submitArticle']);
+        Route::post('mpc/submit-article', [MpcController::class, 'storeArticle']);
+        Route::delete('mpc/drafts/{id}', [MpcController::class, 'destroyDraft']);
+        Route::get('mpc/activity-logs', [MpcController::class, 'activityLogs']);
+        Route::get('mpc/transparency', [MpcController::class, 'transparency']);
+        Route::get('mpc/profile-settings', [MpcController::class, 'profileSettings']);
+    });
+
+    // Media & Communication Portal endpoints
+    Route::middleware(['role:Media Team,Media and Public Communications Head,Associate Media and Public Communications Head,Media & Communication,Photojournalist Head,Photojournalist'])->group(function () {
+        Route::get('media/dashboard', [MediaController::class, 'dashboard']);
+        Route::get('media/manage-media', [MediaController::class, 'manageMedia']);
+        Route::post('media/submit-media', [MediaController::class, 'storeMedia']);
+        Route::post('media/{id}/endorse', [MediaController::class, 'endorseMedia']);
+        Route::post('media/{id}/revision', [MediaController::class, 'returnMediaForRevision']);
+        Route::post('media/{id}/resubmit', [MediaController::class, 'resubmitMedia']);
+        Route::get('media/manage-articles', [MediaController::class, 'manageArticles']);
+        Route::get('media/submit-article', [MediaController::class, 'submitArticle']);
+        Route::post('media/submit-article', [MediaController::class, 'storeArticle']);
+        Route::delete('media/drafts/{id}', [MediaController::class, 'destroyDraft']);
+        Route::get('media/profile-settings', [MediaController::class, 'profileSettings']);
+    });
+
+    // Cartoonist Portal endpoints
+    Route::middleware(['role:Cartoonist,Cartoonist Head,Associate Cartoonist Head,Chief Cartoonist'])->group(function () {
+        Route::get('cartoonist/dashboard', [CartoonistController::class, 'dashboard']);
+        Route::get('cartoonist/manage-cartoons', [CartoonistController::class, 'manageCartoons']);
+        Route::post('cartoonist/submit-cartoon', [CartoonistController::class, 'storeCartoon']);
+        Route::get('cartoonist/cartoon-desk', [CartoonistController::class, 'cartoonDesk']);
+        Route::post('cartoonist/cartoons/{id}/endorse', [CartoonistController::class, 'endorseCartoon']);
+        Route::post('cartoonist/cartoons/{id}/revision', [CartoonistController::class, 'returnCartoonForRevision']);
+        Route::post('cartoonist/cartoons/{id}/resubmit', [CartoonistController::class, 'resubmitCartoon']);
+        Route::get('cartoonist/manage-articles', [CartoonistController::class, 'manageArticles']);
+        Route::get('cartoonist/submit-article', [CartoonistController::class, 'submitArticle']);
+        Route::post('cartoonist/submit-article', [CartoonistController::class, 'storeArticle']);
+        Route::delete('cartoonist/drafts/{id}', [CartoonistController::class, 'destroyDraft']);
+        Route::get('cartoonist/profile-settings', [CartoonistController::class, 'profileSettings']);
+    });
 });
 
 // Public page endpoints
 Route::get('pages/public/home', [PublicController::class, 'apiHome'])->middleware('web');
 Route::get('pages/public/archives', [PublicController::class, 'apiArchives'])->middleware('web');
+Route::get('pages/public/category/{category_slug}', [PublicController::class, 'apiCategory'])->middleware('web');
+Route::get('pages/public/article/{article_slug}', [PublicController::class, 'apiArticle'])->middleware('web');
+Route::post('pages/public/article/{id}/share', [PublicController::class, 'share'])->middleware('web');
+Route::get('pages/public/author/{author_id}', [PublicController::class, 'apiAuthor'])->middleware('web');
+Route::get('pages/public/officers', [PublicController::class, 'apiOfficers'])->middleware('web');
+Route::post('pages/public/feedback', [PublicController::class, 'submitFeedback'])->middleware('web');
+
+// Direct /api/public/* aliases
+Route::prefix('public')->middleware('web')->group(function () {
+    Route::get('home', [PublicController::class, 'apiHome']);
+    Route::get('archives', [PublicController::class, 'apiArchives']);
+    Route::get('category/{category_slug}', [PublicController::class, 'apiCategory']);
+    Route::get('article/{article_slug}', [PublicController::class, 'apiArticle']);
+    Route::post('article/{id}/share', [PublicController::class, 'share']);
+    Route::get('author/{author_id}', [PublicController::class, 'apiAuthor']);
+    Route::get('officers', [PublicController::class, 'apiOfficers']);
+    Route::post('feedback', [PublicController::class, 'submitFeedback']);
+});
 
 // POST /api/csrf-test – endpoint to verify CSRF protection
 Route::post('csrf-test', function () {

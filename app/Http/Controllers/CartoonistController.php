@@ -29,18 +29,15 @@ class CartoonistController extends Controller
     /**
      * Cartoonist Dashboard
      */
-    public function dashboard(): View
+    public function dashboard(): View|JsonResponse
     {
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
         $roleName = $user->role?->role_name ?? '';
 
-        $isSectionHead = in_array($roleName, [
-            'Cartoonist Head',
-            'Associate Cartoonist Head',
-            'Chief Cartoonist',
-        ], true);
+        $normRole = strtolower(trim($roleName));
+        $isSectionHead = str_contains($normRole, 'head') || str_contains($normRole, 'chief');
 
         if ($isSectionHead) {
             $pendingModels = ArticleImage::cartoons()
@@ -50,10 +47,13 @@ class CartoonistController extends Controller
                 ->get();
 
             $pendingCount = $pendingModels->count();
-            $publishedCount = ArticleImage::cartoons()->where('status', 'published')->count();
+            $publishedCount = ArticleImage::cartoons()->whereIn('status', ['published', 'Published'])->count();
             $libraryCount = ArticleImage::cartoons()->approved()->count();
+            $revisionCount = ArticleImage::cartoons()
+                ->whereIn('status', ['revision', 'for revision', 'returned for revision', 'Returned for Revision', 'For Revision'])
+                ->count();
 
-            $cartoons = $pendingModels->map(fn($item) => $this->imageService->formatForView($item))->values()->all();
+            $cartoons = $pendingModels->take(5)->map(fn($item) => $this->imageService->formatForView($item))->values()->all();
         } else {
             $userCartoons = ArticleImage::cartoons()
                 ->where('uploader_id', $user->id)
@@ -68,18 +68,36 @@ class CartoonistController extends Controller
                 ->count();
             $publishedCount = ArticleImage::cartoons()
                 ->where('uploader_id', $user->id)
-                ->where('status', 'published')
+                ->whereIn('status', ['published', 'Published'])
                 ->count();
             $libraryCount = ArticleImage::cartoons()->approved()->count();
+            $revisionCount = ArticleImage::cartoons()
+                ->where('uploader_id', $user->id)
+                ->whereIn('status', ['revision', 'for revision', 'returned for revision', 'Returned for Revision', 'For Revision'])
+                ->count();
 
             $cartoons = $userCartoons->map(fn($item) => $this->imageService->formatForView($item))->values()->all();
         }
 
+        $totalPublishedArticles = Article::whereIn('status', ['published', 'Published'])->count();
+        $userPublishedArticles = Article::where('user_id', $user?->id)->whereIn('status', ['published', 'Published'])->count();
+
         $metrics = [
             'published' => $publishedCount,
             'pending' => $pendingCount,
+            'revision' => $revisionCount,
+            'published_articles' => $isSectionHead ? $totalPublishedArticles : $userPublishedArticles,
             'library' => $libraryCount,
         ];
+
+        if (request()->wantsJson() || request()->ajax()) {
+            return response()->json([
+                'success' => true,
+                'metrics' => $metrics,
+                'cartoons' => $cartoons,
+                'isSectionHead' => $isSectionHead,
+            ]);
+        }
 
         return view('cartoonist.dashboard', compact('metrics', 'cartoons', 'isSectionHead'));
     }
@@ -87,7 +105,7 @@ class CartoonistController extends Controller
     /**
      * Submit Article View
      */
-    public function submitArticle(Request $request): View
+    public function submitArticle(Request $request): View|JsonResponse
     {
         $categories = Cache::remember('all_categories', 86400, fn() => Category::all());
         $drafts = Article::with(['category', 'user.role'])
@@ -104,13 +122,22 @@ class CartoonistController extends Controller
                 ->find($request->draft_id);
         }
 
+        if ($request->wantsJson() || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'categories' => $categories,
+                'drafts' => $drafts,
+                'editingDraft' => $editingDraft,
+            ]);
+        }
+
         return view('cartoonist.submit-article', compact('categories', 'drafts', 'editingDraft'));
     }
 
     /**
      * Store Article Submission or Draft
      */
-    public function storeArticle(Request $request): RedirectResponse
+    public function storeArticle(Request $request): RedirectResponse|JsonResponse
     {
         $rules = [
             'title' => 'required|string|max:255',
@@ -134,12 +161,27 @@ class CartoonistController extends Controller
             if ($request->filled('article_id')) {
                 $article = Article::where('user_id', Auth::id())->find($request->article_id);
                 if ($article) {
+                    $isRevision = in_array(strtolower(trim((string)$article->status)), [
+                        'for revision', 'for writer revision', 'for head revision',
+                        'for section head revision', 'returned for revision', 'revision',
+                    ]) || stripos((string)$article->status, 'revision') !== false;
+
+                    if ($isRevision && $request->status !== 'Draft') {
+                        if (!Article::isBodyModified($article->content, $cleanContent)) {
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'You cannot submit an article returned for revision without editing the article body. Please revise the manuscript before submitting.',
+                            ], 422);
+                        }
+                    }
+
                     $article->update([
                         'category_id' => $request->category_id,
                         'title' => $request->title,
                         'excerpt' => $request->excerpt,
                         'content' => $cleanContent,
                         'status' => $request->status,
+                        'remarks' => null,
                     ]);
 
                     if ($request->status === 'Pending Review') {
@@ -147,6 +189,14 @@ class CartoonistController extends Controller
                     }
 
                     $this->clearCaches((int) $request->category_id);
+
+                    if ($request->wantsJson() || $request->ajax()) {
+                        return response()->json([
+                            'success' => true,
+                            'message' => $request->status === 'Draft' ? 'Draft saved successfully.' : 'Article submitted successfully.',
+                            'article' => $article,
+                        ]);
+                    }
 
                     if ($request->status === 'Draft') {
                         return redirect()->route('cartoonist.submit-article', ['tab' => 'drafts'])
@@ -174,6 +224,14 @@ class CartoonistController extends Controller
 
             $this->clearCaches((int) $request->category_id);
 
+            if ($request->wantsJson() || $request->ajax()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => $request->status === 'Draft' ? 'Draft saved successfully.' : 'Article submitted successfully to the editorial queue.',
+                    'article' => $article,
+                ]);
+            }
+
             if ($request->status === 'Draft') {
                 return redirect()->route('cartoonist.submit-article', ['tab' => 'drafts'])
                     ->with('success', 'Draft saved successfully.');
@@ -183,6 +241,9 @@ class CartoonistController extends Controller
                 ->with('success', 'Article submitted successfully to the editorial queue.');
 
         } catch (\Exception $e) {
+            if ($request->wantsJson() || $request->ajax()) {
+                return response()->json(['success' => false, 'message' => 'Something went wrong: ' . $e->getMessage()], 500);
+            }
             return back()->withInput()->with('error', 'Something went wrong: ' . $e->getMessage());
         }
     }
@@ -190,7 +251,7 @@ class CartoonistController extends Controller
     /**
      * Manage My Articles View
      */
-    public function manageArticles(): View
+    public function manageArticles(): View|JsonResponse
     {
         /** @var \App\Models\User $user */
         $user = Auth::user();
@@ -216,6 +277,13 @@ class CartoonistController extends Controller
                     'author' => $user->full_name ?? ($article->user->full_name ?? 'Cartoonist'),
                 ];
             });
+
+        if (request()->wantsJson() || request()->ajax()) {
+            return response()->json([
+                'success' => true,
+                'articles' => $articles,
+            ]);
+        }
 
         return view('cartoonist.manage-articles', compact('articles'));
     }
@@ -260,8 +328,7 @@ class CartoonistController extends Controller
             $user,
             $fileOrData,
             'cartoon',
-            $request->input('title'),
-            $request->input('caption')
+            $request->input('title')
         );
 
         ActivityLog::logAction($user->id, 'submitted editorial cartoon');
@@ -281,23 +348,21 @@ class CartoonistController extends Controller
     /**
      * Manage Cartoons View
      */
-    public function manageCartoons(): View
+    public function manageCartoons(): View|JsonResponse
     {
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
         $roleName = $user->role?->role_name ?? '';
 
-        $isSectionHead = in_array($roleName, [
-            'Cartoonist Head',
-            'Associate Cartoonist Head',
-            'Chief Cartoonist',
-        ], true);
+        $normRole = strtolower(trim($roleName));
+        $isSectionHead = str_contains($normRole, 'head') || str_contains($normRole, 'chief');
 
         $query = ArticleImage::cartoons()
             ->with(['uploader.role', 'headApprover.role', 'eicApprover.role', 'article']);
 
-        if (!$isSectionHead) {
+        // Always scope Manage My Cartoons to the authenticated owner's submissions
+        if ($user) {
             $query->where('uploader_id', $user->id);
         }
 
@@ -307,13 +372,21 @@ class CartoonistController extends Controller
             ->values()
             ->all();
 
+        if (request()->wantsJson() || request()->ajax()) {
+            return response()->json([
+                'success' => true,
+                'cartoons' => $cartoons,
+                'isSectionHead' => $isSectionHead,
+            ]);
+        }
+
         return view('cartoonist.manage-cartoons', compact('cartoons', 'isSectionHead'));
     }
 
     /**
      * Cartoon Desk View (Cartoonist Head Review Queue)
      */
-    public function cartoonDesk(): View
+    public function cartoonDesk(): View|JsonResponse
     {
         $pendingCartoons = ArticleImage::cartoons()
             ->pendingHead()
@@ -323,6 +396,13 @@ class CartoonistController extends Controller
             ->map(fn($item) => $this->imageService->formatForView($item))
             ->values()
             ->all();
+
+        if (request()->wantsJson() || request()->ajax()) {
+            return response()->json([
+                'success' => true,
+                'pendingCartoons' => $pendingCartoons,
+            ]);
+        }
 
         return view('cartoonist.cartoon-desk', compact('pendingCartoons'));
     }
@@ -378,17 +458,72 @@ class CartoonistController extends Controller
     }
 
     /**
+     * Resubmit Cartoon Illustration returned for revision
+     */
+    public function resubmitCartoon(int|string $id, Request $request): JsonResponse|RedirectResponse
+    {
+        $request->validate([
+            'cartoon_file' => 'nullable|image|mimes:svg,png,jpg,jpeg,webp|max:10240',
+            'image' => 'nullable|string',
+            'title' => 'nullable|string|max:255',
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $image = ArticleImage::cartoons()->findOrFail($id);
+
+        if ($image->uploader_id !== $user->id && !str_contains(strtolower($user->role?->role_name ?? ''), 'head')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized to resubmit this cartoon.'], 403);
+        }
+
+        $lowerStatus = strtolower(trim((string)$image->status));
+        $isRevision = in_array($lowerStatus, ['revision', 'for revision', 'returned for revision', 'returned'])
+            || stripos($lowerStatus, 'revision') !== false;
+
+        if (!$isRevision) {
+            return response()->json(['success' => false, 'message' => 'This cartoon is not currently returned for revision.'], 422);
+        }
+
+        $fileOrData = null;
+        if ($request->hasFile('cartoon_file')) {
+            $fileOrData = $request->file('cartoon_file');
+        } elseif ($request->filled('image')) {
+            $fileOrData = $request->input('image');
+        }
+
+        $this->imageService->resubmitImage($image, $user, $fileOrData, $request->input('title'));
+        ActivityLog::logAction($user->id, 'resubmitted editorial cartoon');
+
+        if ($request->wantsJson() || $request->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Cartoon illustration resubmitted successfully!',
+                'cartoon' => $this->imageService->formatForView($image),
+            ]);
+        }
+
+        return redirect()->route('cartoonist.manage-cartoons')->with('success', 'Cartoon illustration resubmitted successfully!');
+    }
+
+    /**
      * Profile Settings View
      */
-    public function profileSettings(): View
+    public function profileSettings(): View|JsonResponse
     {
+        if (request()->wantsJson() || request()->ajax()) {
+            return response()->json([
+                'success' => true,
+                'user' => (new AuthController)->formatUserData(Auth::user()),
+            ]);
+        }
+
         return view('cartoonist.profile-settings');
     }
 
     /**
      * Delete Draft
      */
-    public function destroyDraft(int|string $id): RedirectResponse
+    public function destroyDraft(int|string $id): RedirectResponse|JsonResponse
     {
         $article = Article::where('user_id', Auth::id())
             ->where('status', 'Draft')
@@ -396,6 +531,13 @@ class CartoonistController extends Controller
 
         $article->delete();
         $this->clearCaches((int) $article->category_id);
+
+        if (request()->wantsJson() || request()->ajax()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Draft deleted successfully.',
+            ]);
+        }
 
         return redirect()->route('cartoonist.submit-article', ['tab' => 'drafts'])
             ->with('success', 'Draft deleted successfully.');

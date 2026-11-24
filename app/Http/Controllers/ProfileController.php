@@ -70,16 +70,20 @@ class ProfileController extends Controller
         \App\Auth\CachedEloquentUserProvider::clearCache($user->id);
 
         if ($request->wantsJson()) {
+            $effectiveAvatar = $avatarUrl ?? $user->profile_picture_url ?? $user->avatar_url;
             return response()->json([
                 'message' => 'Profile updated successfully',
                 'profile_picture_url' => $user->profile_picture_url,
                 'public_id' => $user->profile_picture_public_id,
                 'profile_picture_public_id' => $user->profile_picture_public_id,
                 'user' => [
+                    'id' => $user->id,
                     'full_name' => $user->full_name,
                     'student_number' => $user->student_number,
                     'role' => $user->role ? $user->role->role_name : null,
-                    'avatar_url' => $avatarUrl ?? $user->avatar_url,
+                    'avatar_url' => $effectiveAvatar,
+                    'avatarUrl' => $effectiveAvatar,
+                    'avatar' => $effectiveAvatar,
                     'profile_picture_url' => $user->profile_picture_url,
                     'profile_picture_public_id' => $user->profile_picture_public_id,
                 ]
@@ -145,6 +149,8 @@ class ProfileController extends Controller
                     'student_number' => $user->student_number,
                     'role' => $user->role ? $user->role->role_name : null,
                     'avatar_url' => $uploadResult['secure_url'],
+                    'avatarUrl' => $uploadResult['secure_url'],
+                    'avatar' => $uploadResult['secure_url'],
                     'profile_picture_url' => $uploadResult['secure_url'],
                     'profile_picture_public_id' => $uploadResult['public_id'],
                 ],
@@ -197,7 +203,9 @@ class ProfileController extends Controller
                 'full_name' => $user->full_name,
                 'student_number' => $user->student_number,
                 'role' => $user->role ? $user->role->role_name : null,
-                'avatar_url' => asset('images/member-placeholder.svg'),
+                'avatar_url' => '/images/member-placeholder.svg',
+                'avatarUrl' => '/images/member-placeholder.svg',
+                'avatar' => '/images/member-placeholder.svg',
                 'profile_picture_url' => null,
                 'profile_picture_public_id' => null,
             ],

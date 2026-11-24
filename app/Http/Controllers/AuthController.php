@@ -80,9 +80,9 @@ class AuthController extends Controller
             return 'writer';
         }
 
-        // 2. Cartoonist: Cartoonist Head -> section-head, otherwise -> cartoonist
+        // 2. Cartoonist roles (Cartoonist, Cartoonist Head, Associate Cartoonist Head, Chief Cartoonist)
         if (str_contains($roleName, 'cartoonist')) {
-            return str_contains($roleName, 'head') ? 'section-head' : 'cartoonist';
+            return 'cartoonist';
         }
 
         // 3. Media and Public Communications (M&PC / Media and Public)
@@ -143,6 +143,8 @@ class AuthController extends Controller
         $portal = $this->resolvePortal($user);
         $roleName = $this->getUserRoleName($user);
 
+        $avatar = $user->profile_picture_url ?: $user->avatar_url;
+
         return [
             'id' => $user->id,
             'student_number' => $user->student_number,
@@ -152,8 +154,9 @@ class AuthController extends Controller
             'email' => $user->email,
             'role' => $roleName ?: ($portal === 'writer' ? 'Writer' : ucfirst($portal)),
             'portal' => $portal,
-            'avatar_url' => $user->avatar_url,
-            'avatarUrl' => $user->avatar_url,
+            'avatar_url' => $avatar,
+            'avatarUrl' => $avatar,
+            'avatar' => $avatar,
             'profile_picture_url' => $user->profile_picture_url,
             'profile_picture_public_id' => $user->profile_picture_public_id,
         ];
@@ -172,8 +175,8 @@ class AuthController extends Controller
             /** @var \App\Models\User $user */
             $user = Auth::user();
             if ($user) {
-                \App\Auth\CachedEloquentUserProvider::clearCache($user->getAuthIdentifier());
-                $user->load('role');
+                $user->loadMissing('role');
+                \Illuminate\Support\Facades\Cache::put('auth_user_' . $user->getAuthIdentifier(), $user, 120);
             }
 
             $portal = $this->resolvePortal($user);

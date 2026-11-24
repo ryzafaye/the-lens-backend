@@ -15,7 +15,7 @@ class AuthorProfileTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_author_profile_renders_with_streamlined_layout_and_no_unwanted_tags(): void
+    public function test_author_profile_api_returns_streamlined_author_portfolio(): void
     {
         $role = Role::create([
             'role_name' => 'Literary Head',
@@ -48,29 +48,16 @@ class AuthorProfileTest extends TestCase
             'published_at' => now(),
         ]);
 
-        $response = $this->get('/author/' . $author->id);
+        $response = $this->getJson('/api/public/author/' . $author->id);
 
         $response->assertStatus(200);
-
-        // Assert removed elements are NOT present
-        $response->assertDontSee('The Lens Publication • Press Corps');
-        $response->assertDontSee('Accredited Journalist');
-        $response->assertDontSee('PUP Biñan Campus');
-        $response->assertDontSee('Reporting Beats:');
-        $response->assertDontSee('Byline Archive');
-        $response->assertDontSee('EDITORIAL DOSSIER');
-        $response->assertDontSee('Press Guild');
-        $response->assertDontSee('Staff contributor covering university news, campus affairs, and community developments for The Lens Publication.');
-
-        // Assert new streamlined elements ARE present
-        $response->assertSee('Arabella Mae D. Andal');
-        $response->assertSee('Literary Head');
-        $response->assertSee('Published articles and campus reporting filed by Arabella Mae D. Andal.');
-        $response->assertSee('Published article');
-        $response->assertSee('Awit ng mga Tala');
+        $response->assertJsonPath('props.authorName', 'Arabella Mae D. Andal');
+        $response->assertJsonPath('props.roleName', 'Literary Head');
+        $response->assertJsonPath('props.articles.0.title', 'Awit ng mga Tala');
+        $response->assertJsonCount(1, 'props.articles');
     }
 
-    public function test_author_profile_renders_empty_state_gracefully(): void
+    public function test_author_profile_api_handles_author_with_no_articles(): void
     {
         $role = Role::create([
             'role_name' => 'Staff Contributor',
@@ -84,12 +71,10 @@ class AuthorProfileTest extends TestCase
             'password' => bcrypt('secret123'),
         ]);
 
-        $response = $this->get('/author/' . $author->id);
+        $response = $this->getJson('/api/public/author/' . $author->id);
 
         $response->assertStatus(200);
-        $response->assertDontSee('The Lens Publication • Press Corps');
-        $response->assertDontSee('Byline Archive');
-        $response->assertSee('Marcus Cruz');
-        $response->assertSee('No Published Dispatches Yet');
+        $response->assertJsonPath('props.authorName', 'Marcus Cruz');
+        $response->assertJsonCount(0, 'props.articles');
     }
 }

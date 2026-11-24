@@ -8,13 +8,18 @@ use Tests\TestCase;
 class ExampleTest extends TestCase
 {
     use RefreshDatabase;
+
     /**
-     * A basic test example.
+     * A basic test example for root API health endpoint.
      */
     public function test_the_application_returns_a_successful_response(): void
     {
         $response = $this->get('/');
 
         $response->assertStatus(200);
+        $response->assertJson([
+            'service' => 'The Lens Publication API',
+            'status' => 'online',
+        ]);
     }
 }

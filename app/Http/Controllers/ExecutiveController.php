@@ -10,6 +10,7 @@ use App\Models\Article;
 use App\Models\Category;
 use App\Models\User;
 use App\Models\Role;
+use App\Models\FinancialRecord;
 use App\Models\ActivityLog;
 use App\Traits\LogsActivity;
 use Illuminate\Support\Facades\Hash;
@@ -87,7 +88,13 @@ class ExecutiveController extends Controller
         $category = $isPresOrVp ? null : $this->getCategoryForUser($user);
 
         // President & VP have EIC/AEIC review access level: review stories awaiting executive approval
-        $statusFilter = $isPresOrVp ? 'Pending EIC Review' : 'Pending Review';
+        $isPresident = $userRole === 'President';
+        $statusFilter = $isPresident 
+            ? ['Pending President Review', 'Pending EIC Review'] 
+            : ($isPresOrVp ? ['Pending EIC Review'] : ['Pending Review']);
+
+        $revisionStatuses = ['For Revision', 'For Writer Revision', 'For Head Revision', 'For Section Head Revision', 'Returned for Revision'];
+        $allPendingStatuses = array_merge($statusFilter, $revisionStatuses);
 
         $query = Article::query();
         if ($category) {
@@ -95,12 +102,13 @@ class ExecutiveController extends Controller
         }
 
         // Cached consolidated aggregate query for 30s to keep navigation instantaneous
-        $cacheKey = $isPresOrVp ? 'executive_dashboard_stats_pres_vp' : ('executive_dashboard_stats_' . ($category->id ?? 'all'));
-        $stats = Cache::remember($cacheKey, 30, function () use ($query, $statusFilter) {
+        $cacheKey = $isPresOrVp ? ('executive_dashboard_stats_' . $userRole) : ('executive_dashboard_stats_' . ($category->id ?? 'all'));
+        $stats = Cache::remember($cacheKey, 30, function () use ($query, $allPendingStatuses) {
+            $statusList = "'" . implode("','", $allPendingStatuses) . "'";
             return (clone $query)->selectRaw("
                 COALESCE(SUM(views), 0) as total_views,
                 COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
-                COUNT(CASE WHEN status = '{$statusFilter}' THEN 1 END) as pending
+                COUNT(CASE WHEN status IN ({$statusList}) THEN 1 END) as pending
             ")->first();
         });
 
@@ -112,22 +120,12 @@ class ExecutiveController extends Controller
             })->count();
         });
 
-        $metrics = [
-            'total_views' => (int) ($stats->total_views ?? 0),
-            'monthly_views' => (int) ($stats->total_views ?? 0),
-            'published_stories' => (int) ($stats->published_stories ?? 0),
-            'pending' => (int) ($stats->pending ?? 0),
-            'active_members' => $activeMembers,
-        ];
-
-        $submissionsCacheKey = $isPresOrVp ? 'exec_dashboard_pending_pres_vp' : ('exec_dashboard_pending_' . ($category->id ?? 'all'));
-        $pendingArticles = Cache::remember($submissionsCacheKey, 30, function () use ($category, $statusFilter) {
-            $submissionsQuery = Article::with(['user.role', 'category'])
-                ->where('status', $statusFilter);
-            if ($category) {
-                $submissionsQuery->where('category_id', $category->id);
-            }
-            return $submissionsQuery->latest()->take(6)->get()->map(function ($art) {
+        $myRecentArticles = Article::with(['category', 'user.role'])
+            ->where('user_id', $user->id)
+            ->latest()
+            ->take(6)
+            ->get()
+            ->map(function ($art) {
                 return [
                     'id' => (string) $art->id,
                     'title' => $art->title,
@@ -137,6 +135,70 @@ class ExecutiveController extends Controller
                     'date' => $art->created_at->format('M d, Y'),
                     'content' => $art->content,
                     'excerpt' => $art->excerpt,
+                    'image' => $art->image,
+                    'canEdit' => in_array($art->status, ['Draft', 'For Revision', 'Pending Review', 'Pending EIC Review', 'Pending Section Head Review', 'Pending President Review']),
+                ];
+            });
+
+        $financialRecords = [];
+        if (\Illuminate\Support\Facades\Schema::hasTable('financial_records')) {
+            $financialRecords = FinancialRecord::with('uploader.role')
+                ->latest()
+                ->take(6)
+                ->get()
+                ->map(function ($rec) {
+                    return [
+                        'id' => (string) $rec->id,
+                        'title' => $rec->title,
+                        'file_name' => $rec->file_name,
+                        'file_url' => $rec->file_url,
+                        'public_id' => $rec->public_id,
+                        'resource_type' => $rec->resource_type,
+                        'file_size' => $rec->file_size,
+                        'uploader' => $rec->uploader ? [
+                            'id' => (string) $rec->uploader->id,
+                            'name' => $rec->uploader->full_name,
+                            'role' => $rec->uploader->role->role_name ?? 'Officer',
+                        ] : null,
+                        'created_at' => $rec->created_at ? $rec->created_at->toISOString() : null,
+                        'formatted_date' => $rec->created_at ? $rec->created_at->format('M d, Y') : null,
+                    ];
+                });
+        }
+
+        $myPendingCount = Article::where('user_id', $user->id)
+            ->where('status', 'like', 'Pending%')
+            ->count();
+
+        $metrics = [
+            'total_views' => (int) ($stats->total_views ?? 0),
+            'monthly_views' => (int) ($stats->total_views ?? 0),
+            'published_stories' => (int) ($stats->published_stories ?? 0),
+            'pending' => $isPresOrVp ? (int) ($stats->pending ?? 0) : $myPendingCount,
+            'active_members' => $activeMembers,
+            'financial_records_count' => count($financialRecords),
+        ];
+
+        $submissionsCacheKey = $isPresOrVp ? ('exec_dashboard_pending_' . $userRole) : ('exec_dashboard_pending_' . ($category->id ?? 'all'));
+        $pendingArticles = Cache::remember($submissionsCacheKey, 30, function () use ($category, $allPendingStatuses) {
+            $submissionsQuery = Article::with(['user.role', 'category'])
+                ->whereIn('status', $allPendingStatuses);
+            if ($category) {
+                $submissionsQuery->where('category_id', $category->id);
+            }
+            return $submissionsQuery->latest()->take(5)->get()->map(function ($art) {
+                return [
+                    'id' => (string) $art->id,
+                    'title' => $art->title,
+                    'author' => $art->user->full_name ?? 'Author',
+                    'author_avatar' => $art->user?->avatar_url ?? ($art->user?->avatar ? asset($art->user->avatar) : asset('images/member-placeholder.svg')),
+                    'category' => $art->category->name ?? 'General',
+                    'status' => $art->status,
+                    'remarks' => $art->remarks ?? '',
+                    'date' => $art->created_at->format('M d, Y'),
+                    'content' => $art->content,
+                    'excerpt' => $art->excerpt,
+                    'image' => $art->image,
                 ];
             });
         });
@@ -153,11 +215,13 @@ class ExecutiveController extends Controller
                     'id' => (string) $art->id,
                     'title' => $art->title,
                     'author' => $art->user->full_name ?? 'Author',
+                    'author_avatar' => $art->user?->avatar_url ?? ($art->user?->avatar ? asset($art->user->avatar) : asset('images/member-placeholder.svg')),
                     'category' => $art->category->name ?? 'General',
                     'status' => $art->status,
                     'date' => $art->created_at->format('M d, Y'),
                     'content' => $art->content,
                     'excerpt' => $art->excerpt,
+                    'image' => $art->image,
                     'views' => (int) ($art->views ?? 0),
                     'shares' => (int) ($art->shares ?? 0),
                 ];
@@ -193,25 +257,31 @@ class ExecutiveController extends Controller
 
         $dashboardData = [
             'metrics' => $metrics,
-            'pendingArticles' => $pendingArticles,
+            'pendingArticles' => $isPresOrVp ? $pendingArticles : [],
+            'myRecentArticles' => $myRecentArticles,
+            'financialRecords' => $financialRecords,
             'articles' => $publishedArticles,
             'category' => $category?->name,
             'recentActivities' => $recentActivities,
             'topJournalists' => $topJournalists,
+            'isPresOrVp' => $isPresOrVp,
         ];
 
         if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
                 'metrics' => $metrics,
-                'pendingArticles' => $pendingArticles,
+                'pendingArticles' => $isPresOrVp ? $pendingArticles : [],
+                'myRecentArticles' => $myRecentArticles,
+                'financialRecords' => $financialRecords,
                 'publishedArticles' => $publishedArticles,
                 'category' => $category?->name,
                 'recentActivities' => $recentActivities,
                 'topJournalists' => $topJournalists,
+                'isPresOrVp' => $isPresOrVp,
             ]);
         }
 
-        return view('executive.dashboard', compact('metrics', 'pendingArticles', 'publishedArticles', 'category', 'dashboardData', 'recentActivities', 'topJournalists'));
+        return view('executive.dashboard', compact('metrics', 'pendingArticles', 'myRecentArticles', 'financialRecords', 'publishedArticles', 'category', 'dashboardData', 'recentActivities', 'topJournalists', 'isPresOrVp'));
     }
 
     public function manageArticles(Request $request)
@@ -346,14 +416,29 @@ class ExecutiveController extends Controller
     {
         $this->authorizePresidentOrVp($request);
 
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $user?->loadMissing('role');
+        $userRole = $user?->role?->role_name ?? '';
+        $isPresident = $userRole === 'President';
+
         $sort = $request->query('sort', 'newest');
-        $cacheKey = "exec_review_articles_all_{$sort}";
+        $cacheKey = "exec_review_articles_{$userRole}_{$sort}";
         $categoryHeads = $this->getCategoryHeadsMap();
 
-        // President and Vice President have EIC/AEIC review access level: review all section-head endorsed stories
-        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads) {
-            $query = Article::with(['user.role', 'category'])
-                ->where('status', 'Pending EIC Review');
+        // President and Vice President review queue:
+        // EIC/AEIC submissions go ONLY to the President for approval!
+        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads, $isPresident) {
+            $query = Article::with(['user.role', 'category']);
+
+            if ($isPresident) {
+                // The President reviews EIC/AEIC submissions ('Pending President Review') AND general 'Pending EIC Review'
+                $query->whereIn('status', ['Pending President Review', 'Pending EIC Review']);
+            } else {
+                // Vice Presidents review general section-head endorsed stories,
+                // but EIC/AEIC submissions are strictly reserved for the President.
+                $query->where('status', 'Pending EIC Review');
+            }
 
             if ($sort === 'oldest') {
                 $query->oldest();
@@ -366,6 +451,7 @@ class ExecutiveController extends Controller
 
                 return [
                     'id' => $article->id,
+                    'user_id' => $article->user_id,
                     'title' => $article->title,
                     'category' => $article->category->name ?? 'General',
                     'category_id' => $article->category_id,
@@ -439,8 +525,16 @@ class ExecutiveController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
+        $userRole = $user?->role?->role_name ?? '';
 
         $article = Article::findOrFail($id);
+
+        if ($article->status === 'Pending President Review' && $userRole !== 'President') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: Only the President can approve articles submitted by the Editor-in-Chief / Associate Editor-in-Chief.',
+            ], 403);
+        }
 
         // If updated title or content are passed with the approve request, persist them as well
         if ($request->filled('title') && $request->filled('content')) {
@@ -476,14 +570,33 @@ class ExecutiveController extends Controller
             'remarks' => 'required|string',
         ]);
 
-        $article = Article::with('category')->findOrFail($id);
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        $user?->loadMissing('role');
+        $userRole = $user?->role?->role_name ?? '';
+
+        $article = Article::with(['category', 'user.role'])->findOrFail($id);
+
+        if ($article->status === 'Pending President Review' && $userRole !== 'President') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: Only the President can return articles submitted by the Editor-in-Chief / Associate Editor-in-Chief.',
+            ], 403);
+        }
         $catName = $article->category->name ?? '';
         $isOpinion = stripos($catName, 'opinion') !== false;
+        $authorRole = $article->user?->role?->role_name ?? '';
+        $isEicOrAeic = in_array($authorRole, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
 
-        $targetStatus = $isOpinion ? 'For Writer Revision' : 'For Head Revision';
-        $message = $isOpinion
-            ? 'Opinion article returned to author for writer revision.'
-            : "Article returned to {$catName} Head for head revision.";
+        if ($isEicOrAeic) {
+            $targetStatus = 'For Writer Revision';
+            $message = "Article returned to {$authorRole} for revision.";
+        } else {
+            $targetStatus = $isOpinion ? 'For Writer Revision' : 'For Head Revision';
+            $message = $isOpinion
+                ? 'Opinion article returned to author for writer revision.'
+                : "Article returned to {$catName} Head for head revision.";
+        }
 
         $article->update([
             'status' => $targetStatus,
@@ -572,6 +685,13 @@ class ExecutiveController extends Controller
 
     protected function resolveEndorserForArticle($article, array $categoryHeadsMap): string
     {
+        // 0. If author is EIC or AEIC, mark direct submission to President
+        $authorRole = $article->user?->role?->role_name ?? '';
+        if (in_array($authorRole, ['Editor-in-Chief', 'Associate Editor-in-Chief'])) {
+            $lastName = $this->extractLastName($article->user->full_name ?? '');
+            return "{$lastName} ({$authorRole})";
+        }
+
         $categoryName = $article->category->name ?? '';
 
         // 1. For Opinion articles, there is no Opinion Head -> Direct Submission
@@ -631,10 +751,32 @@ class ExecutiveController extends Controller
     public function transparency(Request $request)
     {
         $this->authorizeAuditorOrTreasurer($request);
-        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
-            return response()->json(['status' => 'ok']);
+        $records = [];
+        if (\Illuminate\Support\Facades\Schema::hasTable('financial_records')) {
+            $records = FinancialRecord::with('uploader.role')->latest()->get()->map(function ($rec) {
+                return [
+                    'id' => (string) $rec->id,
+                    'title' => $rec->title,
+                    'file_name' => $rec->file_name,
+                    'file_url' => $rec->file_url,
+                    'public_id' => $rec->public_id,
+                    'resource_type' => $rec->resource_type,
+                    'file_size' => $rec->file_size,
+                    'uploader' => $rec->uploader ? [
+                        'id' => (string) $rec->uploader->id,
+                        'name' => $rec->uploader->full_name,
+                        'role' => $rec->uploader->role->role_name ?? 'Officer',
+                        'avatar_url' => $rec->uploader->avatar_url,
+                    ] : null,
+                    'created_at' => $rec->created_at ? $rec->created_at->toISOString() : null,
+                    'formatted_date' => $rec->created_at ? $rec->created_at->format('M d, Y h:i A') : null,
+                ];
+            });
         }
-        return view('executive.transparency');
+        if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json(['status' => 'ok', 'records' => $records]);
+        }
+        return view('executive.transparency', compact('records'));
     }
 
     public function feedbackInbox(Request $request)
@@ -651,7 +793,7 @@ class ExecutiveController extends Controller
     {
         $request = request();
         if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
-            return response()->json(['user' => Auth::user()?->load('role')]);
+            return response()->json(['user' => (new AuthController)->formatUserData(Auth::user())]);
         }
         return view('executive.profile-settings');
     }
@@ -699,6 +841,7 @@ class ExecutiveController extends Controller
             ->map(function ($article) use ($user) {
                 return [
                     'id' => $article->id,
+                    'user_id' => $article->user_id,
                     'title' => $article->title,
                     'category' => $article->category->name ?? 'General',
                     'excerpt' => $article->excerpt,
@@ -750,14 +893,34 @@ class ExecutiveController extends Controller
         $category = Category::find($request->category_id);
         $isOpinion = $category && stripos($category->name, 'opinion') !== false;
 
-        $targetStatus = ($isSectionHead || $isOpinion || $request->status === 'Pending EIC Review')
-            ? ($request->status === 'Draft' ? 'Draft' : 'Pending EIC Review')
-            : $request->status;
+        $rawRoleName = $user?->role?->role_name ?? '';
+        $isEicOrAeic = in_array($rawRoleName, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
+
+        if ($isEicOrAeic) {
+            $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending President Review';
+        } else {
+            // When an executive submits an article, bypass section heads and route directly to EIC/AEIC review!
+            $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending EIC Review';
+        }
 
         try {
             if ($request->filled('article_id')) {
                 $article = Article::where('user_id', Auth::id())->find($request->article_id);
                 if ($article) {
+                    $isRevision = in_array(strtolower(trim((string)$article->status)), [
+                        'for revision', 'for writer revision', 'for head revision',
+                        'for section head revision', 'returned for revision', 'revision',
+                    ]) || stripos((string)$article->status, 'revision') !== false;
+
+                    if ($isRevision && $targetStatus !== 'Draft') {
+                        if (!Article::isBodyModified($article->content, $cleanContent)) {
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'You cannot submit an article returned for revision without editing the article body. Please revise the manuscript before submitting.',
+                            ], 422);
+                        }
+                    }
+
                     $article->update([
                         'category_id' => $request->category_id,
                         'title' => $request->title,
@@ -776,7 +939,7 @@ class ExecutiveController extends Controller
                     if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
                         return response()->json([
                             'success' => true,
-                            'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted successfully.',
+                            'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to Editor-in-Chief for approval.',
                             'article' => $article,
                         ]);
                     }
@@ -814,9 +977,9 @@ class ExecutiveController extends Controller
             if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
                 return response()->json([
                     'success' => true,
-                    'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted successfully.',
+                    'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to Editor-in-Chief for approval.',
                     'article' => $createdArticle,
-                ]);
+                ], 201);
             }
 
             if ($targetStatus === 'Draft') {
@@ -843,8 +1006,10 @@ class ExecutiveController extends Controller
     {
         $userId = Auth::id();
         Cache::forget('executive_dashboard_stats_all');
+        Cache::forget('executive_dashboard_stats_President');
         Cache::forget('executive_dashboard_stats_pres_vp');
         Cache::forget('exec_dashboard_pending_all');
+        Cache::forget('exec_dashboard_pending_President');
         Cache::forget('exec_dashboard_pending_pres_vp');
         Cache::forget('eic_dashboard_stats');
         Cache::forget('eic_dashboard_pending_articles');
@@ -852,6 +1017,8 @@ class ExecutiveController extends Controller
         Cache::forget('eic_review_articles_oldest');
         Cache::forget('exec_review_articles_all_newest');
         Cache::forget('exec_review_articles_all_oldest');
+        Cache::forget('exec_review_articles_President_newest');
+        Cache::forget('exec_review_articles_President_oldest');
         Cache::forget('mpc_dashboard_stats');
         Cache::forget('mpc_dashboard_pending_articles');
         Cache::forget('mpc_dashboard_published_articles');

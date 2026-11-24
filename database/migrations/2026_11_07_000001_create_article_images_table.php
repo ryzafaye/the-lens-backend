@@ -17,7 +17,7 @@ return new class extends Migration
             $table->id();
 
             // Foreign Keys (CRITICAL)
-            $table->foreignId('article_id')->constrained('articles')->onDelete('cascade');
+            $table->foreignId('article_id')->nullable()->constrained('articles')->onDelete('cascade');
             $table->foreignId('uploader_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('head_approved_by')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('eic_approved_by')->nullable()->constrained('users')->nullOnDelete();

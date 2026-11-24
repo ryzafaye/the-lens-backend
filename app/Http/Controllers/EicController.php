@@ -37,7 +37,11 @@ class EicController extends Controller
             return Article::selectRaw("
                 COALESCE(SUM(views), 0) as total_views,
                 COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
-                COUNT(CASE WHEN status = 'Pending EIC Review' THEN 1 END) as pending
+                COUNT(CASE WHEN (status = 'Pending EIC Review' AND user_id NOT IN (
+                    SELECT u.id FROM users u 
+                    JOIN roles r ON u.role_id = r.id 
+                    WHERE r.role_name IN ('Editor-in-Chief', 'Associate Editor-in-Chief')
+                )) OR (status IN ('For Revision', 'For Writer Revision', 'For Head Revision', 'For Section Head Revision', 'Returned for Revision')) THEN 1 END) as pending
             ")->first();
         });
 
@@ -57,18 +61,29 @@ class EicController extends Controller
         ];
 
         $pendingArticles = Cache::remember('eic_dashboard_pending_articles', 30, function () {
+            $revisionStatuses = ['For Revision', 'For Writer Revision', 'For Head Revision', 'For Section Head Revision', 'Returned for Revision'];
             return Article::with(['user.role', 'category'])
-                ->where('status', 'Pending EIC Review')
+                ->where(function ($q) use ($revisionStatuses) {
+                    $q->where(function ($subQ) {
+                        $subQ->where('status', 'Pending EIC Review')
+                             ->whereDoesntHave('user.role', function ($r) {
+                                 $r->whereIn('role_name', ['Editor-in-Chief', 'Associate Editor-in-Chief']);
+                             })
+                             ->where('user_id', '!=', Auth::id());
+                    })->orWhereIn('status', $revisionStatuses);
+                })
                 ->latest()
                 ->take(5)
                 ->get()
                 ->map(function ($art) {
                     return [
-                        'id' => $art->id,
+                        'id' => (string) $art->id,
                         'title' => $art->title,
                         'author' => $art->user->full_name ?? 'Author',
+                        'author_avatar' => $art->user?->avatar_url ?? ($art->user?->avatar ? asset($art->user->avatar) : asset('images/member-placeholder.svg')),
                         'category' => $art->category->name ?? 'General',
                         'status' => $art->status,
+                        'remarks' => $art->remarks ?? '',
                         'date' => $art->created_at->format('M d, Y'),
                         'content' => $art->content,
                         'excerpt' => $art->excerpt,
@@ -409,6 +424,18 @@ class EicController extends Controller
      */
     protected function resolveEndorserForArticle($article, array $categoryHeadsMap): string
     {
+        $authorRole = $article->user?->role?->role_name ?? '';
+        $executiveRoles = [
+            'President', 'Executive Vice President', 'Vice President',
+            'Secretary', 'Associate Secretary', 'Treasurer', 'Auditor',
+            'Public Relations Officer', 'Public Relations', 'Executive',
+        ];
+        foreach ($executiveRoles as $execRole) {
+            if (stripos($authorRole, $execRole) !== false) {
+                return 'Direct Submission (' . $authorRole . ')';
+            }
+        }
+
         $categoryName = $article->category->name ?? '';
 
         // 1. For Opinion articles, there is no Opinion Head -> Direct Submission
@@ -451,12 +478,17 @@ class EicController extends Controller
     public function reviewArticles(Request $request)
     {
         $sort = $request->query('sort', 'newest');
-        $cacheKey = 'eic_review_articles_' . $sort;
+        $userId = Auth::id() ?? 0;
+        $cacheKey = 'eic_review_articles_' . $userId . '_' . $sort;
         $categoryHeads = $this->getCategoryHeadsMap();
 
-        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads) {
+        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads, $userId) {
             $query = Article::with(['user.role', 'category'])
-                ->where('status', 'Pending EIC Review');
+                ->where('status', 'Pending EIC Review')
+                ->whereDoesntHave('user.role', function ($q) {
+                    $q->whereIn('role_name', ['Editor-in-Chief', 'Associate Editor-in-Chief']);
+                })
+                ->where('user_id', '!=', $userId);
 
             if ($sort === 'oldest') {
                 $query->oldest();
@@ -469,6 +501,7 @@ class EicController extends Controller
 
                 return [
                     'id' => $article->id,
+                    'user_id' => $article->user_id,
                     'title' => $article->title,
                     'category' => $article->category->name ?? 'General',
                     'category_id' => $article->category_id,
@@ -505,6 +538,10 @@ class EicController extends Controller
         ]);
 
         $article = Article::findOrFail($id);
+
+        if ($article->user_id === Auth::id()) {
+            return response()->json(['message' => 'Unauthorized: You cannot review or approve your own manuscript.'], 403);
+        }
 
         $cleanContent = $this->sanitizeArticleContent($request->content);
 
@@ -544,6 +581,10 @@ class EicController extends Controller
 
         $article = Article::findOrFail($id);
 
+        if ($article->user_id === Auth::id()) {
+            return response()->json(['message' => 'Unauthorized: You cannot review or approve your own manuscript.'], 403);
+        }
+
         // If updated title or content are passed with the approve request, persist them as well
         if ($request->filled('title') && $request->filled('content')) {
             $cleanContent = $this->sanitizeArticleContent($request->content);
@@ -582,13 +623,29 @@ class EicController extends Controller
         ]);
 
         $article = Article::with('category')->findOrFail($id);
+
+        if ($article->user_id === Auth::id()) {
+            return response()->json(['message' => 'Unauthorized: You cannot return your own manuscript for revision.'], 403);
+        }
+
         $catName = $article->category->name ?? '';
         $isOpinion = stripos($catName, 'opinion') !== false;
 
-        $targetStatus = $isOpinion ? 'For Writer Revision' : 'For Head Revision';
-        $message = $isOpinion
-            ? 'Opinion article returned to author for writer revision.'
-            : "Article returned to {$catName} Head for head revision.";
+        $authorRole = $article->user?->role?->role_name ?? '';
+        $isExecutiveAuthor = false;
+        foreach (['President', 'Vice President', 'Executive Vice President', 'Secretary', 'Associate Secretary', 'Treasurer', 'Auditor', 'Public Relations', 'Executive'] as $exec) {
+            if (stripos($authorRole, $exec) !== false) {
+                $isExecutiveAuthor = true;
+                break;
+            }
+        }
+
+        $targetStatus = ($isOpinion || $isExecutiveAuthor) ? 'For Writer Revision' : 'For Head Revision';
+        $message = $isExecutiveAuthor
+            ? 'Article returned to author for writer revision.'
+            : ($isOpinion
+                ? 'Opinion article returned to author for writer revision.'
+                : "Article returned to {$catName} Head for head revision.");
 
         $article->update([
             'status' => $targetStatus,
@@ -748,12 +805,41 @@ class EicController extends Controller
         $request->validate($rules);
 
         $cleanContent = $this->sanitizeArticleContent($request->content);
-        $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending EIC Review';
+
+        /** @var \App\Models\User $currentUser */
+        $currentUser = Auth::user();
+        $currentUser?->loadMissing('role');
+        $currentUserRole = $currentUser?->role?->role_name ?? '';
+        $isEicOrAeic = in_array($currentUserRole, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
+
+        $targetStatus = $request->status === 'Draft' 
+            ? 'Draft' 
+            : ($isEicOrAeic ? 'Pending President Review' : 'Pending EIC Review');
+
+        $successMsg = $targetStatus === 'Draft'
+            ? 'Draft saved successfully.'
+            : ($isEicOrAeic
+                ? 'Article submitted and forwarded to President for approval.'
+                : 'Article submitted and forwarded to review queue.');
 
         try {
             if ($request->filled('article_id')) {
                 $article = Article::where('user_id', Auth::id())->find($request->article_id);
                 if ($article) {
+                    $isRevision = in_array(strtolower(trim((string)$article->status)), [
+                        'for revision', 'for writer revision', 'for head revision',
+                        'for section head revision', 'returned for revision', 'revision',
+                    ]) || stripos((string)$article->status, 'revision') !== false;
+
+                    if ($isRevision && $targetStatus !== 'Draft') {
+                        if (!Article::isBodyModified($article->content, $cleanContent)) {
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'You cannot submit an article returned for revision without editing the article body. Please revise the manuscript before submitting.',
+                            ], 422);
+                        }
+                    }
+
                     $article->update([
                         'category_id' => $request->category_id,
                         'title' => $request->title,
@@ -763,7 +849,7 @@ class EicController extends Controller
                         'remarks' => null,
                     ]);
 
-                    if ($targetStatus === 'Pending EIC Review') {
+                    if ($targetStatus === 'Pending EIC Review' || $targetStatus === 'Pending President Review') {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
                     }
 
@@ -771,7 +857,14 @@ class EicController extends Controller
                     Cache::forget('eic_dashboard_pending_articles');
                     Cache::forget('eic_review_articles_newest');
                     Cache::forget('eic_review_articles_oldest');
+                    Cache::forget('executive_dashboard_stats_President');
+                    Cache::forget('executive_dashboard_stats_pres_vp');
+                    Cache::forget('executive_dashboard_stats_all');
+                    Cache::forget('exec_dashboard_pending_President');
                     Cache::forget('exec_dashboard_pending_pres_vp');
+                    Cache::forget('exec_dashboard_pending_all');
+                    Cache::forget('exec_review_articles_President_newest');
+                    Cache::forget('exec_review_articles_President_oldest');
                     Cache::forget('exec_review_articles_' . $request->category_id . '_newest');
                     Cache::forget('exec_review_articles_' . $request->category_id . '_oldest');
                     Cache::forget('exec_review_articles_all_newest');
@@ -780,7 +873,7 @@ class EicController extends Controller
                     if ($request->wantsJson() || $request->is('api/*')) {
                         return response()->json([
                             'success' => true,
-                            'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to review queue.',
+                            'message' => $successMsg,
                             'article' => $article,
                         ]);
                     }
@@ -790,7 +883,7 @@ class EicController extends Controller
                             ->with('success', 'Draft saved successfully.');
                     }
                     return redirect()->route('eic.dashboard')
-                        ->with('success', 'Article submitted and forwarded to review queue.');
+                        ->with('success', $successMsg);
                 }
             }
 
@@ -805,7 +898,7 @@ class EicController extends Controller
                 'shares' => 0,
             ]);
 
-            if ($targetStatus === 'Pending EIC Review') {
+            if ($targetStatus === 'Pending EIC Review' || $targetStatus === 'Pending President Review') {
                 ActivityLog::logAction(Auth::id(), 'submitted', $article);
             }
 
@@ -813,7 +906,14 @@ class EicController extends Controller
             Cache::forget('eic_dashboard_pending_articles');
             Cache::forget('eic_review_articles_newest');
             Cache::forget('eic_review_articles_oldest');
+            Cache::forget('executive_dashboard_stats_President');
+            Cache::forget('executive_dashboard_stats_pres_vp');
+            Cache::forget('executive_dashboard_stats_all');
+            Cache::forget('exec_dashboard_pending_President');
             Cache::forget('exec_dashboard_pending_pres_vp');
+            Cache::forget('exec_dashboard_pending_all');
+            Cache::forget('exec_review_articles_President_newest');
+            Cache::forget('exec_review_articles_President_oldest');
             Cache::forget('exec_review_articles_' . $request->category_id . '_newest');
             Cache::forget('exec_review_articles_' . $request->category_id . '_oldest');
             Cache::forget('exec_review_articles_all_newest');
@@ -822,7 +922,7 @@ class EicController extends Controller
             if ($request->wantsJson() || $request->is('api/*')) {
                 return response()->json([
                     'success' => true,
-                    'message' => $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to review queue.',
+                    'message' => $successMsg,
                     'article' => $article,
                 ]);
             }
@@ -833,7 +933,7 @@ class EicController extends Controller
             }
 
             return redirect()->route('eic.dashboard')
-                ->with('success', 'Article submitted and forwarded to review queue.');
+                ->with('success', $successMsg);
 
         } catch (\Exception $e) {
             if ($request->wantsJson() || $request->is('api/*')) {

@@ -28,7 +28,6 @@ class ArticleImage extends Model
     protected $fillable = [
         'article_id',
         'title',
-        'caption',
         'uploader_id',
         'head_approved_by',
         'eic_approved_by',
@@ -152,7 +151,17 @@ class ArticleImage extends Model
      */
     public function scopeApproved(Builder $query): Builder
     {
-        return $query->whereIn('status', ['approved', 'published', 'EIC Approved', 'approved_for_mpc']);
+        return $query->whereIn('status', [
+            'approved',
+            'Approved',
+            'published',
+            'Published',
+            'EIC Approved',
+            'eic approved',
+            'eic_approved',
+            'approved_for_mpc',
+            'Approved for MPC',
+        ]);
     }
 
     /**

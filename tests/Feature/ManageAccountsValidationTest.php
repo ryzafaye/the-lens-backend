@@ -115,7 +115,7 @@ class ManageAccountsValidationTest extends TestCase
 
     public function test_executive_can_add_officer_with_valid_student_number(): void
     {
-        $response = $this->actingAs($this->president)->postJson('/executive/manage-accounts', [
+        $response = $this->actingAs($this->president)->postJson('/api/executive/manage-accounts', [
             'student_number' => '2024-00050-BN-0',
             'full_name' => 'Executive Officer',
             'role_id' => $this->writerRole->id,
@@ -129,7 +129,7 @@ class ManageAccountsValidationTest extends TestCase
 
     public function test_executive_cannot_add_officer_with_invalid_student_number(): void
     {
-        $response = $this->actingAs($this->president)->postJson('/executive/manage-accounts', [
+        $response = $this->actingAs($this->president)->postJson('/api/executive/manage-accounts', [
             'student_number' => 'invalid-student-num',
             'full_name' => 'Executive Officer',
             'role_id' => $this->writerRole->id,

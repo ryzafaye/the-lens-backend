@@ -82,9 +82,50 @@ class ExecutiveTransparencyRbacTest extends TestCase
         $response->assertJsonStructure([
             'metrics',
             'pendingArticles',
+            'myRecentArticles',
+            'financialRecords',
             'publishedArticles',
             'recentActivities',
             'topJournalists',
+            'isPresOrVp',
         ]);
+        $this->assertFalse($response->json('isPresOrVp'));
+        $this->assertEmpty($response->json('pendingArticles'));
+    }
+
+    public function test_president_dashboard_has_is_pres_or_vp_and_can_review_articles()
+    {
+        $presidentRole = Role::where('role_name', 'President')->firstOrFail();
+        $president = User::create([
+            'role_id' => $presidentRole->id,
+            'full_name' => 'President User',
+            'student_number' => '2024-99005-BN-0',
+            'email' => 'pres_dash@lens.test',
+            'password' => bcrypt('password123'),
+            'account_status' => 'active',
+        ]);
+
+        $dashResponse = $this->actingAs($president)->getJson('/api/executive/dashboard');
+        $dashResponse->assertOk();
+        $this->assertTrue($dashResponse->json('isPresOrVp'));
+
+        $reviewResponse = $this->actingAs($president)->getJson('/api/executive/review-articles');
+        $reviewResponse->assertOk();
+    }
+
+    public function test_non_president_executives_cannot_review_articles()
+    {
+        $auditorRole = Role::where('role_name', 'Auditor')->firstOrFail();
+        $auditor = User::create([
+            'role_id' => $auditorRole->id,
+            'full_name' => 'Auditor User',
+            'student_number' => '2024-99006-BN-0',
+            'email' => 'auditor_norev@lens.test',
+            'password' => bcrypt('password123'),
+            'account_status' => 'active',
+        ]);
+
+        $response = $this->actingAs($auditor)->getJson('/api/executive/review-articles');
+        $response->assertStatus(403);
     }
 }

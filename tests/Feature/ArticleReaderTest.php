@@ -15,7 +15,7 @@ class ArticleReaderTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_article_page_renders_fullscreen_without_header_or_footer(): void
+    public function test_article_api_returns_article_details_and_increments_views(): void
     {
         $role = Role::create([
             'role_name' => 'Writer',
@@ -48,23 +48,15 @@ class ArticleReaderTest extends TestCase
             'published_at' => now(),
         ]);
 
-        $response = $this->get('/article/' . $article->slug);
+        $response = $this->getJson('/api/public/article/' . $article->slug);
 
         $response->assertStatus(200);
+        $response->assertJsonPath('props.article.title', 'SPOOKTOBER | Manika, Manahimik Ka');
+        $response->assertJsonPath('props.article.slug', 'spooktober-manika-manahimik-ka');
+        $response->assertJsonPath('props.article.excerpt', 'Manika, Manahimik ka');
+        $response->assertJsonPath('props.article.author.name', 'Sofia M. Alcaraz');
+        $this->assertStringContainsString('May tanong ako sa inyo', $response->json('props.article.content'));
 
-        // Assert header and footer are NOT seen
-        $response->assertDontSee('id="header-container"', false);
-        $response->assertDontSee('id="footer-container"', false);
-        $response->assertDontSee('Login as a Member');
-        $response->assertDontSee('Basta Lente, Abante!');
-
-        // Assert full-screen reader chrome IS seen
-        $response->assertSee('modal-topbar');
-        $response->assertSee('article-reader-fullscreen');
-        $response->assertSee('modal-topbar-close');
-        $response->assertSee('SPOOKTOBER | Manika, Manahimik Ka');
-        $response->assertSee('Sofia M. Alcaraz');
-        $response->assertSee('Manika, Manahimik ka');
-        $response->assertSee('May tanong ako sa inyo');
+        $this->assertEquals(15, $article->fresh()->views);
     }
 }

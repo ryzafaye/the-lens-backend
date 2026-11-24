@@ -33,6 +33,28 @@ class ArticleCleanTextTest extends TestCase
         $this->assertStringNotContainsString('&lt;div&gt;', $cleaned3);
         $this->assertStringNotContainsString('<div>', $cleaned3);
         $this->assertStringNotContainsString('<br>', $cleaned3);
+
+        // Verify rich text elements and that <li> tags are completely removed when passed down to DB
+        $richContent = "<h2>Title Heading</h2>\n<p>Introduction paragraph.</p>\n<ul><li>First bullet</li><li>Second bullet</li></ul>\n<ol><li>Numbered step 1</li><li>Numbered step 2</li></ol>\n<blockquote><strong>Important note</strong> in quote</blockquote>";
+        $cleanedRich = Article::cleanArticleBodyText($richContent);
+        $this->assertStringContainsString('<h2>Title Heading</h2>', $cleanedRich);
+        $this->assertStringNotContainsString('<li>', $cleanedRich);
+        $this->assertStringNotContainsString('</li>', $cleanedRich);
+        $this->assertStringNotContainsString('<ul>', $cleanedRich);
+        $this->assertStringNotContainsString('<ol>', $cleanedRich);
+        $this->assertStringContainsString('• First bullet', $cleanedRich);
+        $this->assertStringContainsString('• Second bullet', $cleanedRich);
+        $this->assertStringContainsString('1. Numbered step 1', $cleanedRich);
+        $this->assertStringContainsString('2. Numbered step 2', $cleanedRich);
+        $this->assertStringContainsString('<blockquote><strong>Important note</strong> in quote</blockquote>', $cleanedRich);
+
+        // Verify that indentations and alignments (right, left, center, justified) are preserved
+        $aligned = '<p style="text-align: center;">Centered title</p><div style="text-align: right;">Right date</div><p style="text-align: justify;">Justified paragraph.</p><div align="center">Legacy align center</div><blockquote style="margin-left: 40px;">Indented quote</blockquote>';
+        $cleanedAligned = Article::cleanArticleBodyText($aligned);
+        $this->assertStringContainsString('text-align: center', $cleanedAligned);
+        $this->assertStringContainsString('text-align: right', $cleanedAligned);
+        $this->assertStringContainsString('text-align: justify', $cleanedAligned);
+        $this->assertStringContainsString('<blockquote', $cleanedAligned);
     }
 
     public function test_article_model_mutator_automatically_cleans_content_and_excerpt(): void

@@ -24,17 +24,19 @@ class SectionHeadController extends ExecutiveController
         $query = Article::query();
         if ($category) {
             $query->where('category_id', $category->id);
+        } else {
+            $query->whereHas('category', fn($q) => $q->where('name', '!=', 'Opinion'));
         }
 
         $userId = Auth::id() ?? 0;
         $catKey = $category->id ?? 'all';
         $statsCacheKey = "section_head_dashboard_stats_{$userId}_{$catKey}";
 
-        $stats = Cache::remember($statsCacheKey, 300, function () use ($query, $userId) {
+        $stats = Cache::remember($statsCacheKey, 30, function () use ($query, $userId) {
             return (clone $query)->selectRaw("
                 COALESCE(SUM(views), 0) as total_views,
                 COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
-                COUNT(CASE WHEN (status IN ('Pending Head Review', 'Pending Review')) AND user_id != {$userId} THEN 1 END) as pending
+                COUNT(CASE WHEN ((status IN ('Pending Head Review', 'Pending Review') AND user_id != {$userId}) OR (status IN ('For Head Revision', 'For Section Head Revision', 'For Revision', 'Returned for Revision', 'For Writer Revision'))) THEN 1 END) as pending
             ")->first();
         });
 
@@ -55,13 +57,21 @@ class SectionHeadController extends ExecutiveController
         ];
 
         $pendingCacheKey = "section_head_dashboard_pending_{$userId}_{$catKey}";
-        $pendingArticles = Cache::remember($pendingCacheKey, 300, function () use ($category, $userId) {
+        $pendingArticles = Cache::remember($pendingCacheKey, 30, function () use ($category, $userId) {
             $submissionsQuery = Article::with(['user.role', 'category:id,name'])
-                ->select(['id', 'title', 'slug', 'category_id', 'user_id', 'content', 'excerpt', 'status', 'views', 'shares', 'created_at'])
-                ->whereIn('status', ['Pending Head Review', 'Pending Review'])
-                ->where('user_id', '!=', $userId);
+                ->select(['id', 'title', 'slug', 'category_id', 'user_id', 'content', 'excerpt', 'status', 'remarks', 'views', 'shares', 'created_at'])
+                ->where(function ($q) use ($userId) {
+                    $q->where(function ($sq) use ($userId) {
+                        $sq->whereIn('status', ['Pending Head Review', 'Pending Review'])
+                           ->where('user_id', '!=', $userId);
+                    })->orWhere(function ($sq) {
+                        $sq->whereIn('status', ['For Head Revision', 'For Section Head Revision', 'For Revision', 'Returned for Revision', 'For Writer Revision']);
+                    });
+                });
             if ($category) {
                 $submissionsQuery->where('category_id', $category->id);
+            } else {
+                $submissionsQuery->whereHas('category', fn($q) => $q->where('name', '!=', 'Opinion'));
             }
             return $submissionsQuery->latest()->take(5)->get()->map(function ($art) {
                 return [
@@ -71,6 +81,7 @@ class SectionHeadController extends ExecutiveController
                     'author_avatar' => $art->user?->avatar_url ?? ($art->user?->avatar ? asset($art->user->avatar) : asset('images/member-placeholder.svg')),
                     'category' => $art->category->name ?? 'General',
                     'status' => $art->status,
+                    'remarks' => $art->remarks ?? '',
                     'date' => $art->created_at->format('M d, Y'),
                     'rawDate' => $art->created_at?->toIso8601String(),
                     'content' => $art->content,
@@ -624,6 +635,20 @@ class SectionHeadController extends ExecutiveController
             if ($request->filled('article_id')) {
                 $article = Article::where('user_id', Auth::id())->find($request->article_id);
                 if ($article) {
+                    $isRevision = in_array(strtolower(trim((string)$article->status)), [
+                        'for revision', 'for writer revision', 'for head revision',
+                        'for section head revision', 'returned for revision', 'revision',
+                    ]) || stripos((string)$article->status, 'revision') !== false;
+
+                    if ($isRevision && $targetStatus !== 'Draft') {
+                        if (!Article::isBodyModified($article->content, $cleanContent)) {
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'You cannot submit an article returned for revision without editing the article body. Please revise the manuscript before submitting.',
+                            ], 422);
+                        }
+                    }
+
                     $article->update([
                         'category_id' => $request->category_id,
                         'title' => $request->title,
@@ -812,6 +837,91 @@ class SectionHeadController extends ExecutiveController
         Cache::forget("section_head_dashboard_pending_{$userId}_all");
         Cache::forget("section_head_dashboard_published_all");
         Cache::forget("section_head_dashboard_journalists_all");
+    }
+
+    public function resubmitArticle(Request $request, $id)
+    {
+        $article = Article::with(['category', 'user.role'])->findOrFail($id);
+        $user = Auth::user();
+        $userId = $user->id;
+        $roleName = $user->role?->role_name ?? '';
+        $isPresOrVp = in_array($roleName, ['President', 'Vice President', 'Executive Vice President']);
+        $isEicOrAeic = in_array($roleName, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
+        $isSectionHead = str_ends_with(strtolower($roleName), 'head') && !str_contains(strtolower($roleName), 'cartoonist') && !str_contains(strtolower($roleName), 'photojournalist');
+
+        $canResubmit = ($article->user_id === $userId) || $isPresOrVp || $isEicOrAeic || ($isSectionHead && $article->category_id === $this->getCategoryForUser($user)?->id);
+        if (!$canResubmit) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: You do not have permission to resubmit this article.',
+            ], 403);
+        }
+
+        $isRevision = in_array(strtolower(trim((string)$article->status)), [
+            'for revision', 'for writer revision', 'for head revision',
+            'for section head revision', 'returned for revision', 'revision',
+        ]) || stripos((string)$article->status, 'revision') !== false;
+
+        if (!$isRevision) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Article is not currently in revision status.',
+            ], 400);
+        }
+
+        $newContent = $request->filled('content') ? $this->sanitizeArticleContent($request->content) : $article->content;
+
+        if (!Article::isBodyModified($article->content, $newContent)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You cannot submit an article returned for revision without editing the article body. Please revise the manuscript before submitting.',
+            ], 422);
+        }
+
+        // Determine destination status based on role and category
+        $catName = $article->category?->name ?? '';
+        $isOpinion = stripos($catName, 'opinion') !== false;
+        $authorRole = $article->user?->role?->role_name ?? '';
+        $isAuthorEic = in_array($authorRole, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
+
+        if ($isAuthorEic) {
+            $targetStatus = 'Pending President Review';
+        } elseif ($isOpinion || $isSectionHead || $isPresOrVp || $isEicOrAeic) {
+            $targetStatus = 'Pending EIC Review';
+        } else {
+            $targetStatus = 'Pending Head Review';
+        }
+
+        if ($request->filled('title')) {
+            $article->title = $request->title;
+        }
+        if ($request->has('excerpt')) {
+            $article->excerpt = $request->excerpt ?: \Illuminate\Support\Str::limit(strip_tags($newContent), 160);
+        }
+        $article->content = $newContent;
+        $article->status = $targetStatus;
+        $article->remarks = null;
+        $article->save();
+
+        ActivityLog::logAction(Auth::id(), 'submitted', $article);
+
+        $this->clearAllRelatedCaches($article->category_id);
+        Cache::forget('eic_dashboard_stats');
+        Cache::forget('eic_dashboard_pending_articles');
+        Cache::forget('exec_dashboard_pending_pres_vp');
+        Cache::forget('executive_dashboard_stats_President');
+        Cache::forget('writer_dashboard_stats_' . $article->user_id);
+        Cache::forget('writer_recent_articles_' . $article->user_id);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Article resubmitted successfully for review.',
+            'article' => [
+                'id' => (string) $article->id,
+                'title' => $article->title,
+                'status' => $article->status,
+            ],
+        ]);
     }
 
     protected function sanitizeArticleContent($content)

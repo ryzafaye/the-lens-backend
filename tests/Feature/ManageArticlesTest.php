@@ -113,13 +113,14 @@ class ManageArticlesTest extends TestCase
             'is_archived' => false,
         ]);
 
-        $response = $this->actingAs($this->president)->get('/executive/manage-articles');
+        $response = $this->actingAs($this->president)->getJson('/api/executive/manage-articles');
 
         $response->assertStatus(200);
-        $response->assertSee('Published Campus News');
-        $response->assertSee('Archived History Piece');
-        $response->assertDontSee('Secret Draft Investigation');
-        $response->assertDontSee('Pending Editorial Review Story');
+        $titles = collect($response->json())->pluck('title');
+        $this->assertTrue($titles->contains('Published Campus News'));
+        $this->assertTrue($titles->contains('Archived History Piece'));
+        $this->assertFalse($titles->contains('Secret Draft Investigation'));
+        $this->assertFalse($titles->contains('Pending Editorial Review Story'));
     }
 
     public function test_only_published_and_archived_articles_appear_in_eic_manage_articles(): void
@@ -147,11 +148,12 @@ class ManageArticlesTest extends TestCase
             'is_archived' => false,
         ]);
 
-        $response = $this->actingAs($this->eic)->get('/eic/manage-articles');
+        $response = $this->actingAs($this->eic)->getJson('/api/eic/manage-articles');
 
         $response->assertStatus(200);
-        $response->assertSee('EIC Visible Published Article');
-        $response->assertDontSee('Unapproved Writer Manuscript');
+        $titles = collect($response->json())->pluck('title');
+        $this->assertTrue($titles->contains('EIC Visible Published Article'));
+        $this->assertFalse($titles->contains('Unapproved Writer Manuscript'));
     }
 
     public function test_executive_can_archive_and_restore_article(): void
@@ -170,7 +172,7 @@ class ManageArticlesTest extends TestCase
 
         // Archive
         $archiveResp = $this->actingAs($this->president)
-            ->postJson("/executive/manage-articles/{$article->id}/archive");
+            ->postJson("/api/executive/manage-articles/{$article->id}/archive");
 
         $archiveResp->assertStatus(200)
             ->assertJson(['success' => true]);
@@ -181,7 +183,7 @@ class ManageArticlesTest extends TestCase
 
         // Restore
         $restoreResp = $this->actingAs($this->president)
-            ->postJson("/executive/manage-articles/{$article->id}/restore");
+            ->postJson("/api/executive/manage-articles/{$article->id}/restore");
 
         $restoreResp->assertStatus(200)
             ->assertJson(['success' => true]);
@@ -207,7 +209,7 @@ class ManageArticlesTest extends TestCase
 
         // Edit Title, Excerpt, and Body
         $editResp = $this->actingAs($this->eic)
-            ->putJson("/eic/manage-articles/{$article->id}", [
+            ->putJson("/api/eic/manage-articles/{$article->id}", [
                 'title' => 'Updated EIC Headline Title',
                 'excerpt' => 'Updated excerpt text.',
                 'content' => 'Updated body content describing university developments in full detail.',
@@ -223,7 +225,7 @@ class ManageArticlesTest extends TestCase
 
         // Delete
         $delResp = $this->actingAs($this->eic)
-            ->deleteJson("/eic/manage-articles/{$article->id}");
+            ->deleteJson("/api/eic/manage-articles/{$article->id}");
 
         $delResp->assertStatus(200)
             ->assertJson(['success' => true]);

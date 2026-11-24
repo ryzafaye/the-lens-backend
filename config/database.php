@@ -97,8 +97,11 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'timezone' => env('DB_TIMEZONE', 'Asia/Manila'),
+            'connect_timeout' => env('DB_CONNECT_TIMEOUT', 5),
             'options' => [
-                \PDO::ATTR_PERSISTENT => env('DB_PERSISTENT', true),
+                \PDO::ATTR_PERSISTENT => env('DB_PERSISTENT', false),
+                \PDO::ATTR_TIMEOUT => env('DB_TIMEOUT', 5),
             ],
         ],
 

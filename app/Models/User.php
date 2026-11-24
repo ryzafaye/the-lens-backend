@@ -40,6 +40,16 @@ class User extends Authenticatable
     ];
 
     /**
+     * The accessors to append to the model's array form.
+     *
+     * @var list<string>
+     */
+    protected $appends = [
+        'avatar_url',
+        'avatar',
+    ];
+
+    /**
      * The attributes that should be hidden for serialization.
      *
      * @var list<string>
@@ -87,9 +97,14 @@ class User extends Authenticatable
         return $this->hasMany(ArticleImage::class, 'eic_approved_by');
     }
 
+    public function financialRecords(): HasMany
+    {
+        return $this->hasMany(FinancialRecord::class, 'uploader_id');
+    }
+
     public function getAvatarAttribute()
     {
-        return $this->attributes['profile_picture_url'] ?? null;
+        return $this->attributes['profile_picture_url'] ?? $this->getAvatarUrlAttribute();
     }
 
     public function setAvatarAttribute($value)

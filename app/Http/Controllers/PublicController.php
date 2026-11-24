@@ -8,10 +8,12 @@ use App\Models\Article;
 use App\Models\Category;
 use App\Models\Feedback;
 use App\Models\User;
+use App\Services\PublicationOfficerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 
 class PublicController extends Controller
@@ -155,24 +157,29 @@ class PublicController extends Controller
                 }
             }
 
-            $shapeArticle = function (Article $article) {
+            $shapeArticle = function (?Article $article) {
+                if (!$article) {
+                    return null;
+                }
                 $text = !empty($article->content) ? $article->content : ($article->excerpt ?? '');
                 $words = str_word_count(strip_tags($text));
                 $readMinutes = max(1, (int) ceil(($words > 100 ? $words : $words * 4) / 200));
                 $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
                 $categoryName = $article->category->name ?? null;
                 $authorName = $article->user->full_name ?? null;
-                $authorUrl = $authorName ? route('public.author', $article->user_id) : null;
+                $authorUrl = $authorName ? ('/author/' . $article->user_id) : null;
 
                 return [
                     'id' => $article->id,
-                    'url' => route('public.article', $article->slug),
+                    'slug' => $article->slug,
+                    'url' => '/article/' . $article->slug,
                     'imageUrl' => $imageUrl,
                     'title' => $article->title,
                     'category' => $categoryName,
                     'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : $article->created_at->format('M d, Y'),
                     'excerpt' => $article->excerpt,
                     'author' => $authorName,
+                    'authorId' => $article->user_id,
                     'authorUrl' => $authorUrl,
                     'views' => $article->views,
                     'shares' => $article->shares,
@@ -181,16 +188,18 @@ class PublicController extends Controller
             };
 
             return [
-                'featuredArticle' => $featuredArticle ? $shapeArticle($featuredArticle) : null,
+                'featuredArticle' => $shapeArticle($featuredArticle),
                 'latestArticles' => $latestArticles->map($shapeArticle)->values(),
                 'moreStories' => $moreStories->map($shapeArticle)->values(),
                 'categorySections' => $categories->map(function ($cat) use ($categoryArticles, $shapeArticle) {
-                    $articles = $categoryArticles[$cat->id] ?? collect();
-                    return (object) [
-                        'id' => $cat->id,
-                        'name' => $cat->name,
-                        'slug' => $cat->slug,
-                        'articles' => $articles->map($shapeArticle)->values(),
+                    $items = $categoryArticles[$cat->id] ?? collect();
+                    return [
+                        'category' => [
+                            'id' => $cat->id,
+                            'name' => $cat->name,
+                            'slug' => $cat->slug,
+                        ],
+                        'articles' => $items->map($shapeArticle)->values(),
                     ];
                 })->values(),
             ];
@@ -214,14 +223,9 @@ class PublicController extends Controller
         $dateType = (string) $request->query('dateType', 'any');
         $dateValue = (string) $request->query('dateValue', '');
 
-        $articlesQuery = Article::with([
-            'coverImage:id,article_id,file_url,is_cover',
-            'user:id,full_name,role_id',
-            'category:id,name,slug'
-        ])
-        ->select(self::LIST_COLUMNS)
-        ->whereRaw('LOWER(status) = ?', ['published'])
-        ->where('is_archived', false);
+        $articlesQuery = Article::with(['coverImage', 'user.role', 'category'])
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false);
 
         if ($categoryParam !== 'All' && !empty($categoryParam)) {
             $articlesQuery->whereHas('category', function ($q) use ($categoryParam) {
@@ -256,28 +260,27 @@ class PublicController extends Controller
         };
 
         $articles = $articlesQuery->paginate(12)->withQueryString();
-        $categories = Cache::remember('public_categories_all', 600, function () {
-            return Category::select(['id', 'name', 'slug'])->get();
-        });
+        $categories = Category::select(['id', 'name', 'slug'])->get();
 
         $shapeArticle = function (Article $article) {
-            $text = !empty($article->content) ? $article->content : ($article->excerpt ?? '');
-            $words = str_word_count(strip_tags($text));
+            $words = str_word_count(strip_tags($article->content ?? $article->excerpt ?? ''));
             $readMinutes = max(1, (int) ceil(($words > 100 ? $words : $words * 4) / 200));
             $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
             $categoryName = $article->category->name ?? null;
             $authorName = $article->user->full_name ?? null;
-            $authorUrl = $authorName ? route('public.author', $article->user_id) : null;
+            $authorUrl = $authorName ? ('/author/' . $article->user_id) : null;
 
             return [
                 'id' => $article->id,
-                'url' => route('public.article', $article->slug),
+                'slug' => $article->slug,
+                'url' => '/article/' . $article->slug,
                 'imageUrl' => $imageUrl,
                 'title' => $article->title,
                 'category' => $categoryName,
                 'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : $article->created_at->format('M d, Y'),
                 'excerpt' => $article->excerpt,
                 'author' => $authorName,
+                'authorId' => $article->user_id,
                 'authorUrl' => $authorUrl,
                 'views' => $article->views,
                 'shares' => $article->shares,
@@ -314,6 +317,326 @@ class PublicController extends Controller
 
         return response()->json([
             'props' => $props,
+            'shared' => new \stdClass(),
+        ]);
+    }
+
+    /**
+     * JSON API endpoint for category articles.
+     */
+    public function apiCategory(string $category_slug): JsonResponse
+    {
+        $slug = strtolower(trim($category_slug));
+
+        if ($slug === 'latest') {
+            $articlesQuery = Article::with([
+                'coverImage:id,article_id,file_url,is_cover',
+                'user:id,full_name,role_id',
+                'category:id,name,slug'
+            ])
+            ->select(self::LIST_COLUMNS)
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false)
+            ->latest('published_at');
+
+            $articles = $articlesQuery->paginate(12)->withQueryString();
+
+            $currentCategory = [
+                'id' => null,
+                'name' => 'Latest Releases',
+                'slug' => 'latest',
+                'description' => 'Browse the latest news, features, opinions, and campus reports from The Lens.',
+            ];
+        } else {
+            $normalizedSlug = match ($slug) {
+                'features' => 'feature',
+                'science', 'science-and-technology', 'sci-tech' => 'science-technology',
+                'opinions' => 'opinion',
+                default => $slug,
+            };
+
+            $categoryQuery = Category::where('slug', $normalizedSlug);
+            if (is_numeric($slug)) {
+                $categoryQuery->orWhere('id', (int) $slug);
+            }
+            $cat = $categoryQuery->first();
+
+            if (!$cat) {
+                $cat = Category::whereRaw('LOWER(name) LIKE ?', ["%{$normalizedSlug}%"])->first();
+            }
+
+            if (!$cat) {
+                return response()->json(['message' => 'Category not found'], 404);
+            }
+
+            $articles = Article::with([
+                'coverImage:id,article_id,file_url,is_cover',
+                'user:id,full_name,role_id',
+                'category:id,name,slug'
+            ])
+            ->select(self::LIST_COLUMNS)
+            ->where('category_id', $cat->id)
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false)
+            ->latest('published_at')
+            ->paginate(12)->withQueryString();
+
+            $currentCategory = [
+                'id' => $cat->id,
+                'name' => $cat->name,
+                'slug' => $cat->slug,
+                'description' => "Stories and updates in {$cat->name} from The Lens Publication.",
+            ];
+        }
+
+        $shapeArticle = function (Article $article) {
+            $words = str_word_count(strip_tags($article->content ?? $article->excerpt ?? ''));
+            $readMinutes = max(1, (int) ceil(($words > 100 ? $words : $words * 4) / 200));
+            $imageUrl = $article->cover_url ?: asset('images/maroon.jpg');
+            $categoryName = $article->category->name ?? null;
+            $authorName = $article->user->full_name ?? null;
+
+            return [
+                'id' => $article->id,
+                'slug' => $article->slug,
+                'url' => '/article/' . $article->slug,
+                'imageUrl' => $imageUrl,
+                'title' => $article->title,
+                'category' => $categoryName,
+                'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : $article->created_at->format('M d, Y'),
+                'excerpt' => $article->excerpt,
+                'author' => $authorName,
+                'authorId' => $article->user_id,
+                'authorUrl' => $authorName ? ('/author/' . $article->user_id) : null,
+                'views' => $article->views,
+                'shares' => $article->shares,
+                'readMinutes' => $readMinutes,
+            ];
+        };
+
+        $pagination = $articles->linkCollection()->map(function ($link) use ($currentCategory) {
+            $url = null;
+            if ($link['url']) {
+                $parsed = parse_url($link['url']);
+                $url = '/category/' . $currentCategory['slug'] . (!empty($parsed['query']) ? '?' . $parsed['query'] : '');
+            }
+            return [
+                'url' => $url,
+                'label' => $link['label'],
+                'active' => $link['active'],
+            ];
+        })->values();
+
+        return response()->json([
+            'props' => [
+                'currentCategory' => $currentCategory,
+                'category' => $currentCategory,
+                'articles' => $articles->map($shapeArticle)->values(),
+                'pagination' => $pagination,
+                'total' => $articles->total(),
+            ],
+            'shared' => new \stdClass(),
+        ]);
+    }
+
+    /**
+     * JSON API endpoint for a single article.
+     */
+    public function apiArticle(string $article_slug): JsonResponse
+    {
+        $article = Article::with(['coverImage', 'user.role', 'category'])
+            ->where(function ($q) use ($article_slug) {
+                $q->where('slug', $article_slug);
+                if (is_numeric($article_slug)) {
+                    $q->orWhere('id', (int) $article_slug);
+                }
+            })
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false)
+            ->first();
+
+        if (!$article) {
+            return response()->json(['message' => 'Article not found'], 404);
+        }
+
+        $article->increment('views');
+
+        $relatedArticles = Article::with([
+            'coverImage:id,article_id,file_url,is_cover',
+            'user:id,full_name,role_id',
+            'category:id,name,slug'
+        ])
+        ->select(self::LIST_COLUMNS)
+        ->where('id', '!=', $article->id)
+        ->where('category_id', $article->category_id)
+        ->whereRaw('LOWER(status) = ?', ['published'])
+        ->where('is_archived', false)
+        ->latest('published_at')
+        ->take(3)
+        ->get();
+
+        if ($relatedArticles->count() < 3) {
+            $excludeIds = array_merge([$article->id], $relatedArticles->pluck('id')->all());
+            $backfill = Article::with([
+                'coverImage:id,article_id,file_url,is_cover',
+                'user:id,full_name,role_id',
+                'category:id,name,slug'
+            ])
+            ->select(self::LIST_COLUMNS)
+            ->whereNotIn('id', $excludeIds)
+            ->whereRaw('LOWER(status) = ?', ['published'])
+            ->where('is_archived', false)
+            ->latest('published_at')
+            ->take(3 - $relatedArticles->count())
+            ->get();
+            $relatedArticles = $relatedArticles->concat($backfill);
+        }
+
+        $words = str_word_count(strip_tags($article->content ?? ''));
+        $readingTime = max(1, (int) ceil(($words > 100 ? $words : $words * 4) / 200));
+
+        $raw = $article->content ?: $article->excerpt ?: '';
+        $cleanContent = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $raw);
+        $cleanContent = preg_replace('/<iframe\b[^>]*>(.*?)<\/iframe>/is', '', $cleanContent);
+        if (!str_contains($cleanContent, '<p>') && !str_contains($cleanContent, '<div') && !str_contains($cleanContent, '<h')) {
+            $cleanContent = '<p>' . nl2br(e($cleanContent)) . '</p>';
+        }
+
+        $shapeArticle = function (Article $a) {
+            $text = !empty($a->content) ? $a->content : ($a->excerpt ?? '');
+            $w = str_word_count(strip_tags($text));
+            $rm = max(1, (int) ceil(($w > 100 ? $w : $w * 4) / 200));
+            return [
+                'id' => $a->id,
+                'slug' => $a->slug,
+                'url' => '/article/' . $a->slug,
+                'imageUrl' => $a->cover_url ?: asset('images/maroon.jpg'),
+                'title' => $a->title,
+                'category' => $a->category->name ?? 'The Lens',
+                'categorySlug' => $a->category->slug ?? 'news',
+                'publishedAt' => $a->published_at ? $a->published_at->format('M d, Y') : $a->created_at->format('M d, Y'),
+                'excerpt' => $a->excerpt,
+                'author' => $a->user->full_name ?? null,
+                'authorId' => $a->user_id,
+                'views' => $a->views,
+                'shares' => $a->shares,
+                'readMinutes' => $rm,
+            ];
+        };
+
+        return response()->json([
+            'props' => [
+                'article' => [
+                    'id' => $article->id,
+                    'slug' => $article->slug,
+                    'title' => $article->title,
+                    'excerpt' => $article->excerpt,
+                    'content' => $cleanContent,
+                    'coverUrl' => $article->cover_url ?: asset('images/maroon.jpg'),
+                    'category' => $article->category ? [
+                        'id' => $article->category->id,
+                        'name' => $article->category->name,
+                        'slug' => $article->category->slug,
+                    ] : null,
+                    'author' => $article->user ? [
+                        'id' => $article->user->id,
+                        'name' => $article->user->full_name,
+                        'role' => $article->user->role->role_name ?? 'Staff Contributor',
+                        'avatar' => $article->user->avatar_url,
+                    ] : null,
+                    'publishedAt' => $article->published_at ? $article->published_at->format('M j, Y') : $article->created_at->format('M j, Y'),
+                    'views' => $article->views,
+                    'shares' => $article->shares,
+                    'readingTime' => $readingTime . ' min read',
+                ],
+                'relatedArticles' => $relatedArticles->map($shapeArticle)->values(),
+            ],
+            'shared' => new \stdClass(),
+        ]);
+    }
+
+    /**
+     * JSON API endpoint for author profile.
+     */
+    public function apiAuthor(string $author_id): JsonResponse
+    {
+        $user = null;
+        if (is_numeric($author_id)) {
+            $user = User::with('role')->find($author_id);
+        } else {
+            $decoded = urldecode($author_id);
+            $user = User::with('role')->whereRaw('LOWER(full_name) = ?', [strtolower($decoded)])->first();
+        }
+
+        if (!$user) {
+            return response()->json([
+                'props' => [
+                    'author' => null,
+                    'authorName' => urldecode($author_id),
+                    'articles' => [],
+                    'roleName' => 'Contributing Writer',
+                    'totalViews' => 0,
+                    'beats' => [],
+                    'beatsWithCount' => (object)[],
+                    'latestArticleDate' => null,
+                ],
+                'shared' => new \stdClass(),
+            ]);
+        }
+
+        $articles = Article::with([
+            'coverImage:id,article_id,file_url,is_cover',
+            'category:id,name,slug'
+        ])
+        ->select(self::LIST_COLUMNS)
+        ->where('user_id', $user->id)
+        ->whereRaw('LOWER(status) = ?', ['published'])
+        ->where('is_archived', false)
+        ->latest('published_at')
+        ->get();
+
+        $roleName = $user->role->role_name ?? 'Staff Contributor';
+        $totalViews = (int) $articles->sum('views');
+        $beatsWithCount = $articles->groupBy(fn ($a) => $a->category->name ?? 'General')
+            ->map(fn ($group) => $group->count());
+        $beats = $beatsWithCount->keys();
+        $latestArticleDate = $articles->first()?->published_at ?? $articles->first()?->created_at;
+
+        $shapeArticle = function (Article $a) {
+            $text = !empty($a->content) ? $a->content : ($a->excerpt ?? '');
+            $w = str_word_count(strip_tags($text));
+            $rm = max(1, (int) ceil(($w > 100 ? $w : $w * 4) / 200));
+            return [
+                'id' => $a->id,
+                'slug' => $a->slug,
+                'title' => $a->title,
+                'excerpt' => $a->excerpt,
+                'imageUrl' => $a->cover_url ?: asset('images/maroon.jpg'),
+                'category' => $a->category->name ?? 'The Lens',
+                'categorySlug' => Str::slug($a->category->name ?? 'general'),
+                'publishedAt' => $a->published_at ? $a->published_at->format('M d, Y') : $a->created_at->format('M d, Y'),
+                'views' => $a->views,
+                'shares' => $a->shares,
+                'readMinutes' => $rm,
+            ];
+        };
+
+        return response()->json([
+            'props' => [
+                'author' => [
+                    'id' => $user->id,
+                    'fullName' => $user->full_name,
+                    'avatarUrl' => $user->avatar_url,
+                    'hasCustomAvatar' => !empty($user->profile_picture_url),
+                ],
+                'authorName' => $user->full_name,
+                'articles' => $articles->map($shapeArticle)->values(),
+                'roleName' => $roleName,
+                'totalViews' => $totalViews,
+                'beats' => $beats->values(),
+                'beatsWithCount' => $beatsWithCount,
+                'latestArticleDate' => $latestArticleDate ? $latestArticleDate->format('M d, Y') : null,
+            ],
             'shared' => new \stdClass(),
         ]);
     }
@@ -362,7 +685,6 @@ class PublicController extends Controller
         $category = $categoryQuery->first();
 
         if (!$category) {
-            // Fuzzy search by category name if slug differs
             $category = Category::whereRaw('LOWER(name) LIKE ?', ["%{$normalizedSlug}%"])->firstOrFail();
         }
 
@@ -404,10 +726,8 @@ class PublicController extends Controller
             ->where('is_archived', false)
             ->firstOrFail();
 
-        // Increment view count for the public article
         $article->increment('views');
 
-        // Fetch related articles (same category, excluding current) with list columns
         $relatedArticles = Article::with([
             'coverImage:id,article_id,file_url,is_cover',
             'user:id,full_name,role_id',
@@ -445,7 +765,7 @@ class PublicController extends Controller
     /**
      * Record a share / copy link event for an article.
      */
-    public function share(int $id): JsonResponse
+    public function share(int|string $id): JsonResponse
     {
         $article = Article::findOrFail($id);
         $article->increment('shares');
@@ -608,18 +928,46 @@ class PublicController extends Controller
     /**
      * Handle Feedback form submission.
      */
-    public function submitFeedback(Request $request): RedirectResponse
+    public function submitFeedback(Request $request): JsonResponse|RedirectResponse
     {
         $validated = $request->validate([
             'name' => 'nullable|string|max:100',
             'email' => 'nullable|email|max:150',
-            'category' => 'required|string|in:general,editorial,bug,suggestion,other',
-            'message' => 'required|string|max:2000',
+            'subject' => 'nullable|string|max:120',
+            'category' => 'nullable|string|in:general,editorial,bug,suggestion,other',
+            'message' => 'required|string|max:3000',
         ]);
 
-        Feedback::create($validated);
+        $feedback = Feedback::create([
+            'name' => $validated['name'] ?? null,
+            'email' => $validated['email'] ?? null,
+            'subject' => $validated['subject'] ?? 'General Feedback',
+            'message' => $validated['message'],
+        ]);
+
+        if ($request->wantsJson() || $request->isJson() || $request->ajax() || $request->is('api/*')) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Thank you! Your feedback has been submitted successfully.',
+                'feedback' => $feedback,
+            ]);
+        }
 
         return redirect()->route('public.feedback')
             ->with('success', 'Thank you! Your feedback has been submitted successfully.');
+    }
+
+    /**
+     * JSON API endpoint for public publication officers / executive board.
+     */
+    public function apiOfficers(PublicationOfficerService $officerService): JsonResponse
+    {
+        $data = $officerService->getPublicOfficers();
+
+        return response()->json([
+            'status' => 'ok',
+            'officers' => $data['officers'],
+            'count' => $data['count'],
+        ]);
     }
 }

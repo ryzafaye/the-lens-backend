@@ -157,9 +157,16 @@ class ActivityLog extends Model
             $displayAction = 'submitted';
         }
 
-        $createdAt = $this->created_at ?? now();
-        $isToday = $createdAt->isToday();
-        $isYesterday = $createdAt->isYesterday();
+        $rawCreated = $this->created_at ?? now();
+        if ($rawCreated instanceof \Carbon\CarbonInterface) {
+            $createdAt = $rawCreated->copy()->setTimezone('Asia/Manila');
+        } else {
+            $createdAt = \Carbon\Carbon::parse($rawCreated)->setTimezone('Asia/Manila');
+        }
+
+        $nowPh = \Carbon\Carbon::now('Asia/Manila');
+        $isToday = $createdAt->isSameDay($nowPh);
+        $isYesterday = $createdAt->isSameDay($nowPh->copy()->subDay());
         $dayGroup = $isToday ? 'Today' : ($isYesterday ? 'Yesterday' : $createdAt->format('M d, Y'));
 
         $statementParts = static::formatStatementParts($displayAction, $subjectType, $subjectName);
@@ -175,7 +182,7 @@ class ActivityLog extends Model
             'statementBefore' => $statementParts['before_subject'],
             'statementAfter' => $statementParts['after_subject'],
             'statementSentence' => $statementParts['statement_sentence'],
-            'timestampText' => $createdAt->diffForHumans(),
+            'timestampText' => $createdAt->diffForHumans($nowPh),
             'formattedDate' => $createdAt->format('M d, Y • g:i A'),
             'isoDate' => $createdAt->toIso8601String(),
             'dateKey' => $createdAt->format('Y-m-d'),
@@ -183,7 +190,7 @@ class ActivityLog extends Model
             'user' => $user?->full_name ?? 'System',
             'avatar' => $user?->avatar_url ?? ($user?->avatar ? asset($user->avatar) : asset('images/member-placeholder.svg')),
             'target' => $subjectName,
-            'time' => $createdAt->diffForHumans(),
+            'time' => $createdAt->diffForHumans($nowPh),
         ];
     }
 

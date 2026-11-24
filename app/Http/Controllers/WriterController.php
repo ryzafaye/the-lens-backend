@@ -261,9 +261,16 @@ class WriterController extends Controller
         $category = Category::find($request->category_id);
         $isOpinion = $category && stripos($category->name, 'opinion') !== false;
 
+        $user = Auth::user();
+        $user?->loadMissing('role');
+        $roleName = $user?->role?->role_name ?? '';
+        $isEicOrAeic = in_array($roleName, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
+
         $targetStatus = $request->status === 'Draft'
             ? 'Draft'
-            : ($isOpinion || $request->status === 'Pending EIC Review' ? 'Pending EIC Review' : 'Pending Head Review');
+            : ($isEicOrAeic
+                ? 'Pending President Review'
+                : ($isOpinion || $request->status === 'Pending EIC Review' ? 'Pending EIC Review' : 'Pending Head Review'));
 
         // 2. ERROR CATCHING BLOCK
         try {
@@ -271,6 +278,20 @@ class WriterController extends Controller
             if ($request->filled('article_id')) {
                 $article = Article::where('user_id', Auth::id())->find($request->article_id);
                 if ($article) {
+                    $isRevision = in_array(strtolower(trim((string)$article->status)), [
+                        'for revision', 'for writer revision', 'for head revision',
+                        'for section head revision', 'returned for revision', 'revision',
+                    ]) || stripos((string)$article->status, 'revision') !== false;
+
+                    if ($isRevision && $targetStatus !== 'Draft') {
+                        if (!Article::isBodyModified($article->content, $cleanContent)) {
+                            return response()->json([
+                                'success' => false,
+                                'message' => 'You cannot submit an article returned for revision without editing the article body. Please revise the manuscript before submitting.',
+                            ], 422);
+                        }
+                    }
+
                     $article->update([
                         'category_id' => $request->category_id,
                         'title' => $request->title,
@@ -280,7 +301,7 @@ class WriterController extends Controller
                         'remarks' => null,
                     ]);
 
-                    if (in_array($targetStatus, ['Pending Head Review', 'Pending Review', 'Pending EIC Review'])) {
+                    if (in_array($targetStatus, ['Pending Head Review', 'Pending Review', 'Pending EIC Review', 'Pending President Review'])) {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
                     }
 
@@ -297,12 +318,15 @@ class WriterController extends Controller
                     Cache::forget('exec_review_articles_' . $request->category_id . '_oldest');
                     Cache::forget('exec_review_articles_all_newest');
                     Cache::forget('exec_review_articles_all_oldest');
+                    Cache::forget('executive_dashboard_stats_President');
+                    Cache::forget('exec_dashboard_pending_President');
+                    Cache::forget('exec_review_articles_President_newest');
+                    Cache::forget('exec_review_articles_President_oldest');
 
                     $this->clearWriterCache(Auth::id());
-            $this->clearSectionHeadCaches($request->category_id);
                     $this->clearSectionHeadCaches($request->category_id);
 
-            if ($targetStatus === 'Draft') {
+                    if ($targetStatus === 'Draft') {
                         if ($request->wantsJson() || $request->is('api/*')) {
                             return response()->json([
                                 'success' => true,
@@ -313,9 +337,11 @@ class WriterController extends Controller
                         return redirect()->route('writer.submit-article', ['tab' => 'drafts'])
                             ->with('success', 'Draft saved successfully.');
                     }
-                    $msg = $isOpinion
-                        ? 'Opinion submitted and forwarded directly to Editor-in-Chief review.'
-                        : 'Article submitted successfully.';
+                    $msg = $targetStatus === 'Pending President Review'
+                        ? 'Article submitted and forwarded to President for approval.'
+                        : ($isOpinion
+                            ? 'Opinion submitted and forwarded directly to Editor-in-Chief review.'
+                            : 'Article submitted successfully.');
                     if ($request->wantsJson() || $request->is('api/*')) {
                         return response()->json([
                             'success' => true,
@@ -340,7 +366,7 @@ class WriterController extends Controller
                 'shares' => 0,
             ]);
 
-            if (in_array($targetStatus, ['Pending Head Review', 'Pending Review', 'Pending EIC Review'])) {
+            if (in_array($targetStatus, ['Pending Head Review', 'Pending Review', 'Pending EIC Review', 'Pending President Review'])) {
                 ActivityLog::logAction(Auth::id(), 'submitted', $article);
             }
 
@@ -357,6 +383,10 @@ class WriterController extends Controller
             Cache::forget('exec_review_articles_' . $request->category_id . '_oldest');
             Cache::forget('exec_review_articles_all_newest');
             Cache::forget('exec_review_articles_all_oldest');
+            Cache::forget('executive_dashboard_stats_President');
+            Cache::forget('exec_dashboard_pending_President');
+            Cache::forget('exec_review_articles_President_newest');
+            Cache::forget('exec_review_articles_President_oldest');
 
             $this->clearWriterCache(Auth::id());
             $this->clearSectionHeadCaches($request->category_id);
@@ -373,9 +403,11 @@ class WriterController extends Controller
                     ->with('success', 'Draft saved successfully.');
             }
             
-            $msg = $isOpinion
-                ? 'Opinion submitted and forwarded directly to Editor-in-Chief review.'
-                : 'Article submitted successfully.';
+            $msg = $targetStatus === 'Pending President Review'
+                ? 'Article submitted and forwarded to President for approval.'
+                : ($isOpinion
+                    ? 'Opinion submitted and forwarded directly to Editor-in-Chief review.'
+                    : 'Article submitted successfully.');
             if ($request->wantsJson() || $request->is('api/*')) {
                 return response()->json([
                     'success' => true,
