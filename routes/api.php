@@ -96,6 +96,7 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::patch('eic/manage-accounts/{id}/status', [EicController::class, 'toggleStatus']);
     Route::get('eic/activity-logs', [EicController::class, 'activityLogs']);
     Route::get('eic/feedback-inbox', [EicController::class, 'feedbackInbox']);
+    Route::patch('eic/feedback-inbox/{id}/read', [EicController::class, 'markFeedbackRead']);
     Route::get('eic/profile-settings', [EicController::class, 'profileSettings']);
 
     // Executive Portal endpoints
@@ -120,6 +121,7 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('executive/activity-logs', [ExecutiveController::class, 'activityLogs']);
     Route::get('executive/feedback-inbox', [ExecutiveController::class, 'feedbackInbox']);
     Route::get('executive/feedback', [ExecutiveController::class, 'feedbackInbox']);
+    Route::patch('executive/feedback-inbox/{id}/read', [ExecutiveController::class, 'markFeedbackRead']);
     Route::get('executive/transparency', [ExecutiveController::class, 'transparency']);
     Route::get('executive/profile-settings', [ExecutiveController::class, 'profileSettings']);
 

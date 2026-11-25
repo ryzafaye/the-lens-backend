@@ -192,11 +192,11 @@ class PerformanceOptimizationTest extends TestCase
 
         $data = $response->json();
         $this->assertNotEmpty($data['pendingArticles']);
-        $this->assertEquals('Detailed manuscript body content', $data['pendingArticles'][0]['content']);
+        $this->assertEquals('<p>Detailed manuscript body content</p>', $data['pendingArticles'][0]['content']);
         $this->assertNotNull($data['pendingArticles'][0]['author_avatar']);
 
         $this->assertNotEmpty($data['publishedArticles']);
-        $this->assertEquals('Full published story text body', $data['publishedArticles'][0]['content']);
+        $this->assertEquals('<p>Full published story text body</p>', $data['publishedArticles'][0]['content']);
         $this->assertNotNull($data['publishedArticles'][0]['author_avatar']);
     }
 

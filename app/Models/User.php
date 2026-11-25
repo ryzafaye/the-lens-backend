@@ -102,6 +102,22 @@ class User extends Authenticatable
         return $this->hasMany(FinancialRecord::class, 'uploader_id');
     }
 
+    /**
+     * Determine if the user account is deactivated.
+     */
+    public function isDeactivated(): bool
+    {
+        return strtolower(trim((string) ($this->account_status ?? ''))) === 'deactivated';
+    }
+
+    /**
+     * Determine if the user account is active.
+     */
+    public function isActive(): bool
+    {
+        return !$this->isDeactivated();
+    }
+
     public function getAvatarAttribute()
     {
         return $this->attributes['profile_picture_url'] ?? $this->getAvatarUrlAttribute();

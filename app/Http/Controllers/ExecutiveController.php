@@ -779,14 +779,26 @@ class ExecutiveController extends Controller
         return view('executive.transparency', compact('records'));
     }
 
-    public function feedbackInbox(Request $request)
+    public function feedbackInbox(Request $request, \App\Services\FeedbackService $feedbackService)
     {
         $this->authorizePresidentOrVp($request);
-        $feedbacks = [];
+        $feedbacks = $feedbackService->getInboxMessages();
         if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json(['feedbacks' => $feedbacks]);
         }
         return view('executive.feedback-inbox', compact('feedbacks'));
+    }
+
+    public function markFeedbackRead(Request $request, $id, \App\Services\FeedbackService $feedbackService)
+    {
+        $this->authorizePresidentOrVp($request);
+        $feedback = $feedbackService->markAsRead((int) $id);
+
+        return response()->json([
+            'success' => true,
+            'id' => $feedback->id,
+            'is_read' => (bool) $feedback->is_read,
+        ]);
     }
 
     public function profileSettings()

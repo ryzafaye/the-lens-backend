@@ -49,10 +49,11 @@ class Article extends Model
     }
 
     /**
-     * Sanitizes article body content to store clean text with safe formatting,
-     * preserving indentations and alignments (right, left, center, justified),
-     * and converting/removing raw code like <li>, </li>, <ul>, <ol> so list items
-     * are stored cleanly without <li> code in the DB.
+     * Sanitizes article body content to store clean HTML with safe formatting,
+     * preserving indentations and alignments (center, right, justify, left),
+     * lists (<ul>, <ol>, <li>), headings (<h2>, <h3>, <h4>), blockquotes,
+     * and safe inline styling without leaking raw code tags like <div>, <br>, <code>, <pre>,
+     * or empty wrapper lines in the database.
      */
     public static function cleanArticleBodyText(?string $content): string
     {
@@ -62,14 +63,16 @@ class Article extends Model
 
         $text = $content;
 
-        // Strip dangerous script, style, and iframe tags first
-        $text = preg_replace('/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/i', '', $text);
-        $text = preg_replace('/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/i', '', $text);
-        $text = preg_replace('/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/i', '', $text);
+        // 1. Strip dangerous tags, event handlers, and javascript: links
+        $text = preg_replace('/<(script|style|iframe|object|embed)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>/i', '', $text);
         $text = preg_replace('/\s+on\w+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $text);
+        $text = preg_replace('/href\s*=\s*["\']\s*javascript:[^"\']*["\']/i', 'href="#"', $text);
 
-        // Decode HTML entities (up to 3 passes for nested encoding)
+        // 2. Decode HTML entities (up to 3 passes if double-escaped tags like &lt;p&gt; exist)
         for ($i = 0; $i < 3; $i++) {
+            if (!preg_match('/&amp;(?:lt|gt|quot|#0?39|amp);|&(?:lt|gt);/i', $text)) {
+                break;
+            }
             $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
             if ($decoded === $text) break;
             $text = $decoded;
@@ -78,93 +81,55 @@ class Article extends Model
         // Replace non-breaking spaces
         $text = str_replace(["&nbsp;", "\u{00A0}"], ' ', $text);
 
-        // 1. Remove code like <li> when passed down to DB
-        // Convert ordered lists (<ol>...</ol>) into "1. ...\n2. ..."
-        $text = preg_replace_callback('/<ol\b[^>]*>(.*?)<\/ol>/is', function ($olMatches) {
-            $inner = $olMatches[1];
-            $count = 1;
-            $converted = preg_replace_callback('/<li\b[^>]*>(.*?)<\/li>/is', function ($liMatches) use (&$count) {
-                $item = trim(strip_tags($liMatches[1], '<strong><b><em><i><u><s><a>'));
-                return ($count++) . ". " . $item . "\n";
-            }, $inner);
-            return "\n" . trim($converted) . "\n";
+        // 3. Remove all empty <div><br></div>, <p><br></p>, and raw <br> empty lines completely
+        $text = preg_replace('/<(?:div|p)[^>]*>\s*(?:<br\s*\/?>)?\s*<\/(?:div|p)>/i', '', $text);
+        $text = preg_replace('/<div[^>]*><br\s*\/?>/i', '', $text);
+
+        // 4. Normalize align="center|right|justify|left" attributes to style="text-align: ..."
+        $text = preg_replace_callback('/\\balign\\s*=\\s*["\']?(center|right|justify|left)["\']?/i', function ($m) {
+            return 'style="text-align: ' . strtolower($m[1]) . ';"';
         }, $text);
 
-        // Convert unordered lists (<ul>...</ul>) into "• ...\n"
-        $text = preg_replace_callback('/<ul\b[^>]*>(.*?)<\/ul>/is', function ($ulMatches) {
-            $inner = $ulMatches[1];
-            $converted = preg_replace_callback('/<li\b[^>]*>(.*?)<\/li>/is', function ($liMatches) {
-                $item = trim(strip_tags($liMatches[1], '<strong><b><em><i><u><s><a>'));
-                return "• " . $item . "\n";
-            }, $inner);
-            return "\n" . trim($converted) . "\n";
+        // 5. Sanitize style attributes to keep ONLY text-align and margin-left / padding-left
+        $text = preg_replace_callback('/\\bstyle\\s*=\\s*["\']([^"\']*)["\']/i', function ($m) {
+            $rawStyle = $m[1];
+            $kept = [];
+            if (preg_match('/text-align\\s*:\\s*(center|right|justify|left)/i', $rawStyle, $match)) {
+                $kept[] = 'text-align: ' . strtolower($match[1]) . ';';
+            }
+            if (preg_match('/(?:margin-left|padding-left)\\s*:\\s*([0-9.]+(?:px|em|rem|%))/i', $rawStyle, $match)) {
+                $kept[] = 'margin-left: ' . strtolower($match[1]) . ';';
+            }
+            return !empty($kept) ? 'style="' . implode(' ', $kept) . '"' : '';
         }, $text);
 
-        // Convert any stray <li>...</li> to "• ..."
-        $text = preg_replace_callback('/<li\b[^>]*>(.*?)<\/li>/is', function ($liMatches) {
-            $item = trim(strip_tags($liMatches[1], '<strong><b><em><i><u><s><a>'));
-            return "• " . $item . "\n";
+        // 6. Convert any <div> wrapper to semantic <p>
+        $text = preg_replace_callback('/<div(\s+[^>]*)?>(.*?)<\/div>/is', function ($m) {
+            $attrs = trim($m[1] ?? '');
+            $inner = trim($m[2] ?? '');
+            if ($inner === '' || preg_match('/^(?:<br\s*\/?>|\s*)+$/i', $inner)) {
+                return '';
+            }
+            return '<p' . ($attrs ? ' ' . $attrs : '') . '>' . $inner . '</p>';
         }, $text);
 
-        // Strip any remaining list tags and escaped entity list tags from entering DB
-        $text = preg_replace('/<\/?(?:ul|ol|li)\b[^>]*>/i', '', $text);
-        $text = preg_replace('/&lt;\/?(?:ul|ol|li)\b[^&gt;]*&gt;/i', '', $text);
+        // 7. Strip stray/residual <div>, <br>, <code>, <pre> tags and any code tags completely
+        $text = preg_replace('/<\/?(?:div|br|code|pre)\b[^>]*>/i', '', $text);
+        $text = preg_replace('/&lt;\/?(?:div|br|code|pre)\b[^&gt;]*&gt;/i', '', $text);
 
-        // 2. Normalize align="center|right|justify|left" attributes to style="text-align: ..."
-        $text = preg_replace('/\balign\s*=\s*["\']?(center|right|justify|left)["\']?/i', 'style="text-align: $1;"', $text);
+        // 8. Strip all tags EXCEPT semantic rich text formatting tags (NO <div>, NO <br>, NO <code>, NO <pre>)
+        $allowedTags = '<p><ul><ol><li><h2><h3><h4><blockquote><strong><b><em><i><u><s><strike><del><sub><sup><a><hr>';
+        $text = strip_tags($text, $allowedTags);
 
-        // 3. Replace empty block lines like <div><br></div> or <p><br></p> with newlines
-        $text = preg_replace('/<(?:div|p)[^>]*>\s*<br\s*\/?>\s*<\/(?:div|p)>/i', "\n", $text);
+        // 9. Remove any empty tags that might have resulted
+        $text = preg_replace('/<(?:p|h[1-6]|blockquote)[^>]*>\s*<\/(?:p|h[1-6]|blockquote)>/i', '', $text);
 
-        // Replace <br> tags with newlines
-        $text = preg_replace('/<br\s*\/?>/i', "\n", $text);
-
-        // 4. Process block elements (div, p):
-        // Preserve blocks that have alignments (center, right, justify, left) or indentations (margin-left, padding-left)
-        $text = preg_replace_callback('/<(div|p)\b([^>]*)>(.*?)<\/\1>/is', function ($matches) {
-            $attrs = $matches[2];
-            $inner = trim($matches[3]);
-            if ($inner === '') {
-                return "\n";
-            }
-
-            $hasCenter = (bool) preg_match('/text-align\s*:\s*center/i', $attrs);
-            $hasRight = (bool) preg_match('/text-align\s*:\s*right/i', $attrs);
-            $hasJustify = (bool) preg_match('/text-align\s*:\s*justify/i', $attrs);
-            $hasLeft = (bool) preg_match('/text-align\s*:\s*left/i', $attrs);
-            $hasIndent = (bool) preg_match('/(margin-left|padding-left)\s*:\s*(\d+px)/i', $attrs, $indentMatches);
-
-            if ($hasCenter) {
-                return "\n<div style=\"text-align: center;\">" . $inner . "</div>\n";
-            }
-            if ($hasRight) {
-                return "\n<div style=\"text-align: right;\">" . $inner . "</div>\n";
-            }
-            if ($hasJustify) {
-                return "\n<div style=\"text-align: justify;\">" . $inner . "</div>\n";
-            }
-            if ($hasLeft) {
-                return "\n<div style=\"text-align: left;\">" . $inner . "</div>\n";
-            }
-            if ($hasIndent) {
-                return "\n<div style=\"margin-left: " . $indentMatches[2] . ";\">" . $inner . "</div>\n";
-            }
-
-            // Plain block without alignment
-            return "\n" . $inner . "\n";
-        }, $text);
-
-        // Strip all tags EXCEPT safe rich text editor tags (NO <li>, <ol>, <ul>!)
-        $text = strip_tags($text, '<h2><h3><h4><blockquote><div><p><strong><b><em><i><u><s><strike><del><a><hr><sub><sup><code><pre>');
-
-        // Clean any literal escaped entity tags
-        $text = preg_replace('/&lt;\/?(?:div|p|br|li|ol|ul)[^&gt;]*&gt;/i', '', $text);
+        // 10. Clean empty paragraphs at edges
+        $text = preg_replace('/^(?:\s*<p[^>]*>\s*<\/p>)+/i', '', $text);
+        $text = preg_replace('/(?:\s*<p[^>]*>\s*<\/p>)+$/i', '', $text);
 
         // Normalize carriage returns
         $text = str_replace(["\r\n", "\r"], "\n", $text);
-
-        // Clean redundant consecutive empty lines
-        $text = preg_replace('/(\n\s*){3,}/', "\n\n", $text);
 
         return trim($text);
     }

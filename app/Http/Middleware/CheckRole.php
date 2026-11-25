@@ -17,6 +17,26 @@ class CheckRole
 
         /** @var \App\Models\User $user */
         $user = Auth::user();
+
+        // Enforce account deactivation check
+        if ($user && (method_exists($user, 'isDeactivated') ? $user->isDeactivated() : (strtolower(trim((string)($user->account_status ?? ''))) === 'deactivated'))) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            $deactivatedMessage = 'Your account has been deactivated. Please contact an administrator.';
+
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'message' => $deactivatedMessage,
+                ], 403);
+            }
+
+            return redirect('/login')->withErrors([
+                'student_number' => $deactivatedMessage,
+            ]);
+        }
+
         // Eager load role relationship if not already loaded
         if (!$user->relationLoaded('role') || $user->role === null) {
             $user->load('role');

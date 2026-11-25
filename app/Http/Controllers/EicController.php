@@ -1201,14 +1201,25 @@ class EicController extends Controller
         return view('eic.activity-logs', compact('activities'));
     }
 
-    public function feedbackInbox()
+    public function feedbackInbox(\App\Services\FeedbackService $feedbackService)
     {
-        $feedbacks = [];
+        $feedbacks = $feedbackService->getInboxMessages();
         if (request()->wantsJson() || request()->is('api/*')) {
             return response()->json(['feedbacks' => $feedbacks]);
         }
 
         return view('eic.feedback-inbox', compact('feedbacks'));
+    }
+
+    public function markFeedbackRead($id, \App\Services\FeedbackService $feedbackService)
+    {
+        $feedback = $feedbackService->markAsRead((int) $id);
+
+        return response()->json([
+            'success' => true,
+            'id' => $feedback->id,
+            'is_read' => (bool) $feedback->is_read,
+        ]);
     }
 
     public function profileSettings()

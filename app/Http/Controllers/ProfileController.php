@@ -26,11 +26,15 @@ class ProfileController extends Controller
         $validated = $request->validate([
             'full_name' => ['required', 'string', 'max:80'],
             'student_number' => ['required', 'string', 'max:30', 'unique:users,student_number,' . $user->id],
+            'email' => ['nullable', 'string', 'email', 'max:255', 'unique:users,email,' . $user->id],
             'avatar' => ['nullable', 'image', 'mimes:jpeg,jpg,png,webp', 'max:3072'],
         ]);
 
         $user->full_name = trim($validated['full_name']);
         $user->student_number = trim($validated['student_number']);
+        if (array_key_exists('email', $validated)) {
+            $user->email = !empty($validated['email']) ? trim($validated['email']) : null;
+        }
 
         $avatarUrl = null;
         $oldPublicId = $user->profile_picture_public_id;
@@ -80,6 +84,7 @@ class ProfileController extends Controller
                     'id' => $user->id,
                     'full_name' => $user->full_name,
                     'student_number' => $user->student_number,
+                    'email' => $user->email,
                     'role' => $user->role ? $user->role->role_name : null,
                     'avatar_url' => $effectiveAvatar,
                     'avatarUrl' => $effectiveAvatar,

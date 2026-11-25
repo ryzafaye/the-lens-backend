@@ -170,10 +170,32 @@ class AuthController extends Controller
         ]);
 
         if (Auth::attempt($credentials)) {
-            $request->session()->regenerate();
-
             /** @var \App\Models\User $user */
             $user = Auth::user();
+
+            if ($user && $user->isDeactivated()) {
+                Auth::logout();
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+
+                $deactivatedMessage = 'Your account has been deactivated. Please contact an administrator.';
+
+                if ($request->expectsJson() || $request->is('api/*')) {
+                    return response()->json([
+                        'message' => $deactivatedMessage,
+                        'errors' => [
+                            'student_number' => [$deactivatedMessage],
+                        ],
+                    ], 403);
+                }
+
+                return back()->withErrors([
+                    'student_number' => $deactivatedMessage,
+                ])->onlyInput('student_number');
+            }
+
+            $request->session()->regenerate();
+
             if ($user) {
                 $user->loadMissing('role');
                 \Illuminate\Support\Facades\Cache::put('auth_user_' . $user->getAuthIdentifier(), $user, 120);
@@ -236,7 +258,20 @@ class AuthController extends Controller
 
     public function user(Request $request)
     {
+        /** @var \App\Models\User|null $user */
         $user = Auth::user();
+
+        if ($user && $user->isDeactivated()) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return response()->json([
+                'user' => null,
+                'message' => 'Your account has been deactivated. Please contact an administrator.',
+            ], 403);
+        }
+
         return response()->json([
             'user' => $this->formatUserData($user),
         ]);
@@ -250,6 +285,16 @@ class AuthController extends Controller
             return response()->json([
                 'message' => 'Unauthenticated.',
             ], 401);
+        }
+
+        if ($user->isDeactivated()) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return response()->json([
+                'message' => 'Your account has been deactivated. Please contact an administrator.',
+            ], 403);
         }
 
         $defaultPortal = $this->resolvePortal($user);
