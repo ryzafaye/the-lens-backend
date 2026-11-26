@@ -58,7 +58,7 @@ class PublicController extends Controller
 
             $latestArticles = (clone $baseQuery)
                 ->when($featuredArticle, fn ($q) => $q->where('id', '!=', $featuredArticle->id))
-                ->take(4)
+                ->take(5)
                 ->get();
 
             $excludeIds = array_filter(array_merge(
@@ -123,7 +123,7 @@ class PublicController extends Controller
 
             $latestArticles = (clone $baseQuery)
                 ->when($featuredArticle, fn ($q) => $q->where('id', '!=', $featuredArticle->id))
-                ->take(4)
+                ->take(5)
                 ->get();
 
             $excludeIds = array_filter(array_merge(
