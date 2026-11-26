@@ -102,13 +102,15 @@ class ExecutiveController extends Controller
         }
 
         // Cached consolidated aggregate query for 30s to keep navigation instantaneous
-        $cacheKey = $isPresOrVp ? ('executive_dashboard_stats_' . $userRole) : ('executive_dashboard_stats_' . ($category->id ?? 'all'));
-        $stats = Cache::remember($cacheKey, 30, function () use ($query, $allPendingStatuses) {
+        $userId = Auth::id() ?? 0;
+        $v = Cache::get('article_workflow_cache_v', 1);
+        $cacheKey = $isPresOrVp ? ("executive_dashboard_stats_{$userRole}_{$userId}_{$v}") : ("executive_dashboard_stats_" . ($category->id ?? 'all') . "_{$userId}_{$v}");
+        $stats = Cache::remember($cacheKey, 30, function () use ($query, $allPendingStatuses, $userId) {
             $statusList = "'" . implode("','", $allPendingStatuses) . "'";
             return (clone $query)->selectRaw("
                 COALESCE(SUM(views), 0) as total_views,
                 COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
-                COUNT(CASE WHEN status IN ({$statusList}) THEN 1 END) as pending
+                COUNT(CASE WHEN status IN ({$statusList}) AND user_id != {$userId} THEN 1 END) as pending
             ")->first();
         });
 
@@ -179,9 +181,10 @@ class ExecutiveController extends Controller
             'financial_records_count' => count($financialRecords),
         ];
 
-        $submissionsCacheKey = $isPresOrVp ? ('exec_dashboard_pending_' . $userRole) : ('exec_dashboard_pending_' . ($category->id ?? 'all'));
-        $pendingArticles = Cache::remember($submissionsCacheKey, 30, function () use ($category, $allPendingStatuses) {
+        $submissionsCacheKey = $isPresOrVp ? ("exec_dashboard_pending_{$userRole}_{$userId}_{$v}") : ("exec_dashboard_pending_" . ($category->id ?? 'all') . "_{$userId}_{$v}");
+        $pendingArticles = Cache::remember($submissionsCacheKey, 30, function () use ($category, $allPendingStatuses, $userId) {
             $submissionsQuery = Article::with(['user.role', 'category'])
+                ->where('user_id', '!=', $userId)
                 ->whereIn('status', $allPendingStatuses);
             if ($category) {
                 $submissionsQuery->where('category_id', $category->id);
@@ -423,13 +426,16 @@ class ExecutiveController extends Controller
         $isPresident = $userRole === 'President';
 
         $sort = $request->query('sort', 'newest');
-        $cacheKey = "exec_review_articles_{$userRole}_{$sort}";
+        $userId = Auth::id() ?? 0;
+        $v = Cache::get('article_workflow_cache_v', 1);
+        $cacheKey = "exec_review_articles_{$userRole}_{$userId}_{$sort}_{$v}";
         $categoryHeads = $this->getCategoryHeadsMap();
 
         // President and Vice President review queue:
         // EIC/AEIC submissions go ONLY to the President for approval!
-        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads, $isPresident) {
-            $query = Article::with(['user.role', 'category']);
+        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads, $isPresident, $userId) {
+            $query = Article::with(['user.role', 'category'])
+                ->where('user_id', '!=', $userId);
 
             if ($isPresident) {
                 // The President reviews EIC/AEIC submissions ('Pending President Review') AND general 'Pending EIC Review'
@@ -494,6 +500,13 @@ class ExecutiveController extends Controller
 
         $article = Article::findOrFail($id);
 
+        if ((int) $article->user_id === (int) Auth::id()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: You cannot review or edit your own manuscript.',
+            ], 403);
+        }
+
         $cleanContent = $this->sanitizeArticleContent($request->content);
 
         $article->update([
@@ -528,6 +541,14 @@ class ExecutiveController extends Controller
         $userRole = $user?->role?->role_name ?? '';
 
         $article = Article::findOrFail($id);
+
+        if ((int) $article->user_id === (int) Auth::id()) {
+            $msg = 'Unauthorized: You cannot approve your own manuscript.';
+            if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+                return response()->json(['success' => false, 'message' => $msg], 403);
+            }
+            abort(403, $msg);
+        }
 
         if ($article->status === 'Pending President Review' && $userRole !== 'President') {
             return response()->json([
@@ -576,6 +597,14 @@ class ExecutiveController extends Controller
         $userRole = $user?->role?->role_name ?? '';
 
         $article = Article::with(['category', 'user.role'])->findOrFail($id);
+
+        if ((int) $article->user_id === (int) Auth::id()) {
+            $msg = 'Unauthorized: You cannot return your own manuscript for revision.';
+            if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+                return response()->json(['success' => false, 'message' => $msg], 403);
+            }
+            abort(403, $msg);
+        }
 
         if ($article->status === 'Pending President Review' && $userRole !== 'President') {
             return response()->json([
@@ -896,16 +925,20 @@ class ExecutiveController extends Controller
         $rawRoleName = $user?->role?->role_name ?? '';
         $isEicOrAeic = in_array($rawRoleName, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
 
+        $isDraft = strtolower(trim((string) $request->input('status'))) === 'draft'
+            || strtolower(trim((string) $request->input('action'))) === 'draft';
+
         if ($isEicOrAeic) {
-            $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending President Review';
+            $targetStatus = $isDraft ? 'Draft' : 'Pending President Review';
         } else {
             // When an executive submits an article, bypass section heads and route directly to EIC/AEIC review!
-            $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending EIC Review';
+            $targetStatus = $isDraft ? 'Draft' : 'Pending EIC Review';
         }
 
         try {
-            if ($request->filled('article_id')) {
-                $article = Article::where('user_id', Auth::id())->find($request->article_id);
+            $incomingArticleId = $request->input('article_id') ?? $request->input('id');
+            if (!empty($incomingArticleId)) {
+                $article = Article::where('user_id', Auth::id())->find($incomingArticleId);
                 if ($article) {
                     $isRevision = in_array(strtolower(trim((string)$article->status)), [
                         'for revision', 'for writer revision', 'for head revision',
@@ -1005,6 +1038,7 @@ class ExecutiveController extends Controller
     protected function clearSubmissionCaches($categoryId = null)
     {
         $userId = Auth::id();
+        Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
         Cache::forget('executive_dashboard_stats_all');
         Cache::forget('executive_dashboard_stats_President');
         Cache::forget('executive_dashboard_stats_pres_vp');

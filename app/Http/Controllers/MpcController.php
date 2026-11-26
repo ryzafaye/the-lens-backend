@@ -197,7 +197,7 @@ class MpcController extends Controller
                     'coverArtist' => $article->coverImage?->artist_name ?? '',
                     'coverType' => $article->coverImage?->image_type ?? '',
                     'excerpt' => $article->excerpt ?: Str::limit(strip_tags($article->content ?? ''), 120),
-                    'body' => $article->content ? (str_contains($article->content, '<p>') ? $article->content : collect(preg_split('/\n\n+/', trim($article->content)))->map(fn($p) => '<p>' . htmlspecialchars(trim($p)) . '</p>')->implode('')) : '<p>Manuscript content approved.</p>',
+                    'body' => $article->content ? (preg_match('/<(?:p|div|h[1-6]|blockquote|ul|ol|li|strong|b|em|i|u|br)\b/i', $article->content) ? $article->content : collect(preg_split('/\n\n+/', trim($article->content)))->map(fn($p) => '<p>' . htmlspecialchars(trim($p)) . '</p>')->implode('')) : '<p>Manuscript content approved.</p>',
                     'publishedAt' => $article->published_at ? $article->published_at->format('M d, Y') : null,
                 ];
             });
@@ -499,7 +499,10 @@ class MpcController extends Controller
             'article_id' => 'nullable|integer'
         ];
 
-        if ($request->input('status') === 'Draft') {
+        $isDraft = strtolower(trim((string) $request->input('status'))) === 'draft'
+            || strtolower(trim((string) $request->input('action'))) === 'draft';
+
+        if ($isDraft) {
             $rules['content'] = 'nullable|string';
         } else {
             $rules['content'] = 'required|string';
@@ -507,10 +510,7 @@ class MpcController extends Controller
 
         $validated = $request->validate($rules);
 
-        $status = $validated['status'];
-        if ($status !== 'Draft') {
-            $status = 'Pending Review';
-        }
+        $status = $isDraft ? 'Draft' : 'Pending Review';
 
         if (!empty($validated['article_id'])) {
             $article = Article::where('id', $validated['article_id'])

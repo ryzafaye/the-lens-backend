@@ -30,13 +30,14 @@ class SectionHeadController extends ExecutiveController
 
         $userId = Auth::id() ?? 0;
         $catKey = $category->id ?? 'all';
-        $statsCacheKey = "section_head_dashboard_stats_{$userId}_{$catKey}";
+        $v = Cache::get('article_workflow_cache_v', 1);
+        $statsCacheKey = "section_head_dashboard_stats_{$userId}_{$catKey}_{$v}";
 
         $stats = Cache::remember($statsCacheKey, 30, function () use ($query, $userId) {
             return (clone $query)->selectRaw("
                 COALESCE(SUM(views), 0) as total_views,
                 COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
-                COUNT(CASE WHEN ((status IN ('Pending Head Review', 'Pending Review') AND user_id != {$userId}) OR (status IN ('For Head Revision', 'For Section Head Revision', 'For Revision', 'Returned for Revision', 'For Writer Revision'))) THEN 1 END) as pending
+                COUNT(CASE WHEN status IN ('Pending Head Review', 'Pending Review', 'For Head Revision', 'For Section Head Revision', 'For Revision', 'Returned for Revision', 'For Writer Revision') AND user_id != {$userId} THEN 1 END) as pending
             ")->first();
         });
 
@@ -56,17 +57,14 @@ class SectionHeadController extends ExecutiveController
             'active_members' => $activeMembers,
         ];
 
-        $pendingCacheKey = "section_head_dashboard_pending_{$userId}_{$catKey}";
+        $pendingCacheKey = "section_head_dashboard_pending_{$userId}_{$catKey}_{$v}";
         $pendingArticles = Cache::remember($pendingCacheKey, 30, function () use ($category, $userId) {
             $submissionsQuery = Article::with(['user.role', 'category:id,name'])
                 ->select(['id', 'title', 'slug', 'category_id', 'user_id', 'content', 'excerpt', 'status', 'remarks', 'views', 'shares', 'created_at'])
-                ->where(function ($q) use ($userId) {
-                    $q->where(function ($sq) use ($userId) {
-                        $sq->whereIn('status', ['Pending Head Review', 'Pending Review'])
-                           ->where('user_id', '!=', $userId);
-                    })->orWhere(function ($sq) {
-                        $sq->whereIn('status', ['For Head Revision', 'For Section Head Revision', 'For Revision', 'Returned for Revision', 'For Writer Revision']);
-                    });
+                ->where('user_id', '!=', $userId)
+                ->where(function ($q) {
+                    $q->whereIn('status', ['Pending Head Review', 'Pending Review'])
+                      ->orWhereIn('status', ['For Head Revision', 'For Section Head Revision', 'For Revision', 'Returned for Revision', 'For Writer Revision']);
                 });
             if ($category) {
                 $submissionsQuery->where('category_id', $category->id);
@@ -261,7 +259,8 @@ class SectionHeadController extends ExecutiveController
         $sort = $request->query('sort', 'newest');
         $catKey = $category->id ?? 'general';
         $userId = Auth::id() ?? 0;
-        $cacheKey = "section_head_review_articles_{$userId}_{$catKey}_{$sort}";
+        $v = Cache::get('article_workflow_cache_v', 1);
+        $cacheKey = "section_head_review_articles_{$userId}_{$catKey}_{$sort}_{$v}";
 
         $pendingArticles = Cache::remember($cacheKey, 300, function () use ($category, $sort, $userId) {
             $query = Article::with(['user:id,full_name,profile_picture_url,role_id', 'category:id,name'])
@@ -299,10 +298,11 @@ class SectionHeadController extends ExecutiveController
             });
         });
 
-        $revCacheKey = "section_head_revision_articles_{$userId}_{$catKey}_{$sort}";
+        $revCacheKey = "section_head_revision_articles_{$userId}_{$catKey}_{$sort}_{$v}";
         $revisionArticles = Cache::remember($revCacheKey, 300, function () use ($category, $sort, $userId) {
             $query = Article::with(['user:id,full_name,profile_picture_url,role_id', 'category:id,name'])
-                ->whereIn('status', ['For Head Revision', 'For Section Revision', 'Section Revision']);
+                ->whereIn('status', ['For Head Revision', 'For Section Revision', 'Section Revision'])
+                ->where('user_id', '!=', $userId);
 
             // STRICT: Section head can only see revision articles under their assigned section!
             if ($category) {
@@ -408,6 +408,17 @@ class SectionHeadController extends ExecutiveController
 
         $article = Article::with('category')->findOrFail($id);
 
+        if ((int) $article->user_id === (int) Auth::id()) {
+            $msg = 'Unauthorized: You cannot review or edit your own manuscript.';
+            if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg,
+                ], 403);
+            }
+            abort(403, $msg);
+        }
+
         // Strict authorization: A section head can only edit articles under their assigned section!
         if ($category && $article->category_id !== $category->id) {
             $catName = $category->name;
@@ -457,6 +468,17 @@ class SectionHeadController extends ExecutiveController
         $category = $this->getCategoryForUser($user);
 
         $article = Article::with('category')->findOrFail($id);
+
+        if ((int) $article->user_id === (int) Auth::id()) {
+            $msg = 'Unauthorized: You cannot approve your own manuscript.';
+            if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg,
+                ], 403);
+            }
+            abort(403, $msg);
+        }
 
         // Strict authorization: A section head can ONLY approve articles under their assigned section!
         if ($category && $article->category_id !== $category->id) {
@@ -511,6 +533,17 @@ class SectionHeadController extends ExecutiveController
         $category = $this->getCategoryForUser($user);
 
         $article = Article::with('category')->findOrFail($id);
+
+        if ((int) $article->user_id === (int) Auth::id()) {
+            $msg = 'Unauthorized: You cannot return your own manuscript for revision.';
+            if ($request->wantsJson() || $request->is('api/*') || $request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $msg,
+                ], 403);
+            }
+            abort(403, $msg);
+        }
 
         // Strict authorization: A section head can ONLY return articles under their assigned section!
         if ($category && $article->category_id !== $category->id) {
@@ -629,7 +662,9 @@ class SectionHeadController extends ExecutiveController
         $cleanContent = $this->sanitizeArticleContent($request->content);
 
         // Section Head submissions bypass section head review and go directly to EIC/AEIC for approval
-        $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending EIC Review';
+        $isDraft = strtolower(trim((string) $request->input('status'))) === 'draft'
+            || strtolower(trim((string) $request->input('action'))) === 'draft';
+        $targetStatus = $isDraft ? 'Draft' : 'Pending EIC Review';
 
         try {
             if ($request->filled('article_id')) {
@@ -659,6 +694,7 @@ class SectionHeadController extends ExecutiveController
                     ]);
 
                     $this->clearAllRelatedCaches($request->category_id);
+                    Cache::forget('section_head_drafts_' . Auth::id());
 
                     if ($targetStatus === 'Pending EIC Review') {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
@@ -699,6 +735,7 @@ class SectionHeadController extends ExecutiveController
             }
 
             $this->clearAllRelatedCaches($request->category_id);
+            Cache::forget('section_head_drafts_' . Auth::id());
 
             $msg = $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to Editor-in-Chief for approval.';
 
@@ -799,6 +836,7 @@ class SectionHeadController extends ExecutiveController
     protected function clearAllRelatedCaches($categoryId = null)
     {
         $userId = Auth::id() ?? 0;
+        Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
         Cache::forget("section_head_dashboard_stats_{$userId}");
         Cache::forget("section_head_recent_articles_{$userId}");
         Cache::forget("section_head_manage_articles_{$userId}");

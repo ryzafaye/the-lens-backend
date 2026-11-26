@@ -266,7 +266,10 @@ class WriterController extends Controller
         $roleName = $user?->role?->role_name ?? '';
         $isEicOrAeic = in_array($roleName, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
 
-        $targetStatus = $request->status === 'Draft'
+        $isDraft = strtolower(trim((string) $request->input('status'))) === 'draft'
+            || strtolower(trim((string) $request->input('action'))) === 'draft';
+
+        $targetStatus = $isDraft
             ? 'Draft'
             : ($isEicOrAeic
                 ? 'Pending President Review'
@@ -308,7 +311,8 @@ class WriterController extends Controller
                     Cache::forget('writer_dashboard_stats_' . Auth::id());
                     Cache::forget('writer_recent_articles_' . Auth::id());
                     Cache::forget('eic_dashboard_stats');
-                    Cache::forget('eic_dashboard_pending_articles');
+                    Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
+Cache::forget('eic_dashboard_pending_articles');
                     Cache::forget('eic_review_articles_newest');
                     Cache::forget('eic_review_articles_oldest');
                     Cache::forget('exec_dashboard_pending_pres_vp');
@@ -373,7 +377,8 @@ class WriterController extends Controller
             Cache::forget('writer_dashboard_stats_' . Auth::id());
             Cache::forget('writer_recent_articles_' . Auth::id());
             Cache::forget('eic_dashboard_stats');
-            Cache::forget('eic_dashboard_pending_articles');
+            Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
+Cache::forget('eic_dashboard_pending_articles');
             Cache::forget('eic_review_articles_newest');
             Cache::forget('eic_review_articles_oldest');
             Cache::forget('exec_dashboard_pending_pres_vp');
@@ -479,7 +484,8 @@ class WriterController extends Controller
 
             // Invalidate EIC and Executive caches so submissions (especially direct Opinion articles) immediately reflect
             Cache::forget('eic_dashboard_stats');
-            Cache::forget('eic_dashboard_pending_articles');
+            Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
+Cache::forget('eic_dashboard_pending_articles');
             Cache::forget('eic_review_articles_newest');
             Cache::forget('eic_review_articles_oldest');
             Cache::forget('exec_dashboard_pending_all');

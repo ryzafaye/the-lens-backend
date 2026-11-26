@@ -270,10 +270,28 @@ class ActivityLog extends Model
             $beforeSubject = 'approved the visual artwork';
         } elseif ($actionLower === 'submitted editorial cartoon') {
             $beforeSubject = 'submitted the editorial cartoon';
+        } elseif ($actionLower === 'resubmitted editorial cartoon') {
+            $beforeSubject = 'resubmitted the editorial cartoon';
         } elseif ($actionLower === 'submitted photo') {
             $beforeSubject = 'submitted the photo';
+        } elseif ($actionLower === 'resubmitted photo') {
+            $beforeSubject = 'resubmitted the photo';
         } elseif (in_array($actionLower, ['submitted media', 'submitted illustration'])) {
             $beforeSubject = "submitted {$typePhrase}";
+        } elseif (in_array($actionLower, ['resubmitted media', 'resubmitted illustration', 'resubmitted article', 'resubmitted'])) {
+            $beforeSubject = "resubmitted {$typePhrase}";
+        } elseif (str_starts_with($actionLower, 'resubmitted ')) {
+            $noun = $typePhrase;
+            if (str_contains($actionLower, 'cartoon')) {
+                $noun = 'the editorial cartoon';
+            } elseif (str_contains($actionLower, 'photo')) {
+                $noun = 'the photo';
+            } elseif (str_contains($actionLower, 'visual') || str_contains($actionLower, 'artwork')) {
+                $noun = 'the visual artwork';
+            } elseif (str_contains($actionLower, 'media') || str_contains($actionLower, 'graphic')) {
+                $noun = 'the media asset';
+            }
+            $beforeSubject = "resubmitted {$noun}";
         } elseif (in_array($actionLower, ['emergency delete', 'emergency deleted', 'hard delete', 'hard deleted', 'permanently delete', 'permanently deleted'])) {
             $beforeSubject = "permanently deleted {$typePhrase}";
         } elseif (in_array($actionLower, ['deleted', 'deleted article'])) {
@@ -295,11 +313,14 @@ class ActivityLog extends Model
         } elseif (in_array($actionLower, ['submitted', 'approved', 'published', 'unpublished', 'archived', 'restored'])) {
             $beforeSubject = "{$actionLower} {$typePhrase}";
         } else {
-            if (str_ends_with($actionLower, ' for') || str_ends_with($actionLower, ' to') || str_ends_with($actionLower, ' of')) {
-                $beforeSubject = "{$action} {$typePhrase}";
-            } else {
-                $beforeSubject = "{$action} {$typePhrase}";
-            }
+            $alreadyHasNoun =
+                str_contains($actionLower, $lowerType) ||
+                str_contains($actionLower, 'editorial cartoon') ||
+                str_contains($actionLower, 'photo') ||
+                str_contains($actionLower, 'media asset') ||
+                str_contains($actionLower, 'visual artwork') ||
+                str_contains($actionLower, 'article');
+            $beforeSubject = $alreadyHasNoun ? $action : "{$action} {$typePhrase}";
         }
 
         $nameQuote = $cleanSubjectName !== '' ? " \"{$cleanSubjectName}\"" : '';

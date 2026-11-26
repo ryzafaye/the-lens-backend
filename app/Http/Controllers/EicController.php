@@ -31,17 +31,19 @@ class EicController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
         $user?->loadMissing('role');
+        $userId = Auth::id() ?? 0;
+        $v = Cache::get('article_workflow_cache_v', 1);
 
         // Cache consolidated dashboard metrics for 30s to keep navigation instantaneous
-        $stats = Cache::remember('eic_dashboard_stats', 30, function () {
+        $stats = Cache::remember("eic_dashboard_stats_{$userId}_{$v}", 30, function () use ($userId) {
             return Article::selectRaw("
                 COALESCE(SUM(views), 0) as total_views,
                 COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
-                COUNT(CASE WHEN (status = 'Pending EIC Review' AND user_id NOT IN (
+                COUNT(CASE WHEN user_id != {$userId} AND ((status = 'Pending EIC Review' AND user_id NOT IN (
                     SELECT u.id FROM users u 
                     JOIN roles r ON u.role_id = r.id 
                     WHERE r.role_name IN ('Editor-in-Chief', 'Associate Editor-in-Chief')
-                )) OR (status IN ('For Revision', 'For Writer Revision', 'For Head Revision', 'For Section Head Revision', 'Returned for Revision')) THEN 1 END) as pending
+                )) OR (status IN ('For Revision', 'For Writer Revision', 'For Head Revision', 'For Section Head Revision', 'Returned for Revision'))) THEN 1 END) as pending
             ")->first();
         });
 
@@ -60,16 +62,16 @@ class EicController extends Controller
             'active_members' => $activeMembers,
         ];
 
-        $pendingArticles = Cache::remember('eic_dashboard_pending_articles', 30, function () {
+        $pendingArticles = Cache::remember("eic_dashboard_pending_articles_{$userId}_{$v}", 30, function () use ($userId) {
             $revisionStatuses = ['For Revision', 'For Writer Revision', 'For Head Revision', 'For Section Head Revision', 'Returned for Revision'];
             return Article::with(['user.role', 'category'])
+                ->where('user_id', '!=', $userId)
                 ->where(function ($q) use ($revisionStatuses) {
                     $q->where(function ($subQ) {
                         $subQ->where('status', 'Pending EIC Review')
                              ->whereDoesntHave('user.role', function ($r) {
                                  $r->whereIn('role_name', ['Editor-in-Chief', 'Associate Editor-in-Chief']);
-                             })
-                             ->where('user_id', '!=', Auth::id());
+                             });
                     })->orWhereIn('status', $revisionStatuses);
                 })
                 ->latest()
@@ -479,7 +481,8 @@ class EicController extends Controller
     {
         $sort = $request->query('sort', 'newest');
         $userId = Auth::id() ?? 0;
-        $cacheKey = 'eic_review_articles_' . $userId . '_' . $sort;
+        $v = Cache::get('article_workflow_cache_v', 1);
+        $cacheKey = 'eic_review_articles_' . $userId . '_' . $sort . '_' . $v;
         $categoryHeads = $this->getCategoryHeadsMap();
 
         $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads, $userId) {
@@ -539,7 +542,7 @@ class EicController extends Controller
 
         $article = Article::findOrFail($id);
 
-        if ($article->user_id === Auth::id()) {
+        if ((int) $article->user_id === (int) Auth::id()) {
             return response()->json(['message' => 'Unauthorized: You cannot review or approve your own manuscript.'], 403);
         }
 
@@ -552,6 +555,8 @@ class EicController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'edited manuscript', $article);
+
+        Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
 
         Cache::forget('eic_dashboard_stats');
         Cache::forget('eic_dashboard_pending_articles');
@@ -581,7 +586,7 @@ class EicController extends Controller
 
         $article = Article::findOrFail($id);
 
-        if ($article->user_id === Auth::id()) {
+        if ((int) $article->user_id === (int) Auth::id()) {
             return response()->json(['message' => 'Unauthorized: You cannot review or approve your own manuscript.'], 403);
         }
 
@@ -600,6 +605,8 @@ class EicController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'approved', $article);
+
+        Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
 
         Cache::forget('eic_dashboard_stats');
         Cache::forget('eic_dashboard_pending_articles');
@@ -624,7 +631,7 @@ class EicController extends Controller
 
         $article = Article::with('category')->findOrFail($id);
 
-        if ($article->user_id === Auth::id()) {
+        if ((int) $article->user_id === (int) Auth::id()) {
             return response()->json(['message' => 'Unauthorized: You cannot return your own manuscript for revision.'], 403);
         }
 
@@ -655,6 +662,7 @@ class EicController extends Controller
         ActivityLog::logAction(Auth::id(), 'returned for revision', $article);
 
         Article::clearArticleCaches($article);
+        Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
         Cache::forget('eic_dashboard_stats');
         Cache::forget('eic_dashboard_pending_articles');
         Cache::forget('eic_review_articles_newest');
@@ -812,8 +820,11 @@ class EicController extends Controller
         $currentUserRole = $currentUser?->role?->role_name ?? '';
         $isEicOrAeic = in_array($currentUserRole, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
 
-        $targetStatus = $request->status === 'Draft' 
-            ? 'Draft' 
+        $isDraft = strtolower(trim((string) $request->input('status'))) === 'draft'
+            || strtolower(trim((string) $request->input('action'))) === 'draft';
+
+        $targetStatus = $isDraft
+            ? 'Draft'
             : ($isEicOrAeic ? 'Pending President Review' : 'Pending EIC Review');
 
         $successMsg = $targetStatus === 'Draft'
@@ -853,7 +864,8 @@ class EicController extends Controller
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
                     }
 
-                    Cache::forget('eic_dashboard_stats');
+                    Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
+            Cache::forget('eic_dashboard_stats');
                     Cache::forget('eic_dashboard_pending_articles');
                     Cache::forget('eic_review_articles_newest');
                     Cache::forget('eic_review_articles_oldest');
@@ -902,6 +914,7 @@ class EicController extends Controller
                 ActivityLog::logAction(Auth::id(), 'submitted', $article);
             }
 
+            Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
             Cache::forget('eic_dashboard_stats');
             Cache::forget('eic_dashboard_pending_articles');
             Cache::forget('eic_review_articles_newest');
