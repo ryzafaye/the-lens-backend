@@ -186,6 +186,11 @@ class CartoonistController extends Controller
 
                     if ($request->status === 'Pending Review') {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                        /** @var \App\Models\User|null $actor */
+                        $actor = Auth::user();
+                        if ($actor) {
+                            app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $actor);
+                        }
                     }
 
                     $this->clearCaches((int) $request->category_id);
@@ -220,6 +225,11 @@ class CartoonistController extends Controller
 
             if ($request->status === 'Pending Review') {
                 ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                /** @var \App\Models\User|null $actor */
+                $actor = Auth::user();
+                if ($actor) {
+                    app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $actor);
+                }
             }
 
             $this->clearCaches((int) $request->category_id);
@@ -332,6 +342,7 @@ class CartoonistController extends Controller
         );
 
         ActivityLog::logAction($user->id, 'submitted editorial cartoon');
+        app(\App\Services\WorkflowNotificationService::class)->notifyMediaSubmitted($cartoon, $user);
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
@@ -418,6 +429,7 @@ class CartoonistController extends Controller
 
         $this->imageService->endorseByHead($image, $user);
         ActivityLog::logAction($user->id, 'endorsed cartoon to EIC');
+        app(\App\Services\WorkflowNotificationService::class)->notifyMediaEndorsed($image, $user);
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
@@ -445,6 +457,7 @@ class CartoonistController extends Controller
 
         $this->imageService->returnForRevision($image, $user, (string) $request->remarks);
         ActivityLog::logAction($user->id, 'returned cartoon for revision');
+        app(\App\Services\WorkflowNotificationService::class)->notifyMediaRevision($image, $user, (string) $request->remarks);
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([
@@ -493,6 +506,7 @@ class CartoonistController extends Controller
 
         $this->imageService->resubmitImage($image, $user, $fileOrData, $request->input('title'));
         ActivityLog::logAction($user->id, 'resubmitted editorial cartoon');
+        app(\App\Services\WorkflowNotificationService::class)->notifyMediaSubmitted($image, $user);
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json([

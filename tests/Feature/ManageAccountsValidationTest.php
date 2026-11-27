@@ -44,6 +44,7 @@ class ManageAccountsValidationTest extends TestCase
     {
         $response = $this->actingAs($this->eic)->postJson('/api/eic/manage-accounts', [
             'student_number' => '2024-00010-BN-0',
+            'email' => 'juan.delacruz@pup.edu.ph',
             'full_name' => 'Juan Dela Cruz',
             'role_id' => $this->writerRole->id,
         ]);
@@ -51,6 +52,7 @@ class ManageAccountsValidationTest extends TestCase
         $response->assertStatus(200);
         $this->assertDatabaseHas('users', [
             'student_number' => '2024-00010-BN-0',
+            'email' => 'juan.delacruz@pup.edu.ph',
             'full_name' => 'Juan Dela Cruz',
         ]);
     }
@@ -66,9 +68,10 @@ class ManageAccountsValidationTest extends TestCase
             'invalid-number',     // random string
         ];
 
-        foreach ($invalidFormats as $invalid) {
+        foreach ($invalidFormats as $idx => $invalid) {
             $response = $this->actingAs($this->eic)->postJson('/api/eic/manage-accounts', [
                 'student_number' => $invalid,
+                'email' => "officer{$idx}@pup.edu.ph",
                 'full_name' => 'Test Officer',
                 'role_id' => $this->writerRole->id,
             ]);
@@ -82,6 +85,7 @@ class ManageAccountsValidationTest extends TestCase
     {
         $response = $this->actingAs($this->eic)->postJson('/api/eic/manage-accounts', [
             'student_number' => '2024-00025-bn-0',
+            'email' => 'Maria.Santos@PUP.edu.ph',
             'full_name' => 'Maria Santos',
             'role_id' => $this->writerRole->id,
         ]);
@@ -89,6 +93,7 @@ class ManageAccountsValidationTest extends TestCase
         $response->assertStatus(200);
         $this->assertDatabaseHas('users', [
             'student_number' => '2024-00025-BN-0',
+            'email' => 'maria.santos@pup.edu.ph',
             'full_name' => 'Maria Santos',
         ]);
     }
@@ -105,6 +110,7 @@ class ManageAccountsValidationTest extends TestCase
 
         $response = $this->actingAs($this->eic)->postJson('/api/eic/manage-accounts', [
             'student_number' => '2024-00030-BN-0',
+            'email' => 'another@test.com',
             'full_name' => 'Another Member',
             'role_id' => $this->writerRole->id,
         ]);
@@ -117,6 +123,7 @@ class ManageAccountsValidationTest extends TestCase
     {
         $response = $this->actingAs($this->president)->postJson('/api/executive/manage-accounts', [
             'student_number' => '2024-00050-BN-0',
+            'email' => 'exec.officer@pup.edu.ph',
             'full_name' => 'Executive Officer',
             'role_id' => $this->writerRole->id,
         ]);
@@ -124,6 +131,7 @@ class ManageAccountsValidationTest extends TestCase
         $response->assertStatus(200);
         $this->assertDatabaseHas('users', [
             'student_number' => '2024-00050-BN-0',
+            'email' => 'exec.officer@pup.edu.ph',
         ]);
     }
 
@@ -131,11 +139,35 @@ class ManageAccountsValidationTest extends TestCase
     {
         $response = $this->actingAs($this->president)->postJson('/api/executive/manage-accounts', [
             'student_number' => 'invalid-student-num',
+            'email' => 'invalid.sn@pup.edu.ph',
             'full_name' => 'Executive Officer',
             'role_id' => $this->writerRole->id,
         ]);
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['student_number']);
+    }
+
+    public function test_add_officer_requires_valid_unique_email(): void
+    {
+        $responseInvalid = $this->actingAs($this->eic)->postJson('/api/eic/manage-accounts', [
+            'student_number' => '2024-00060-BN-0',
+            'email' => 'not-an-email',
+            'full_name' => 'Bad Email Officer',
+            'role_id' => $this->writerRole->id,
+        ]);
+
+        $responseInvalid->assertStatus(422);
+        $responseInvalid->assertJsonValidationErrors(['email']);
+
+        $responseDup = $this->actingAs($this->eic)->postJson('/api/eic/manage-accounts', [
+            'student_number' => '2024-00061-BN-0',
+            'email' => 'eic@test.com',
+            'full_name' => 'Duplicate Email Officer',
+            'role_id' => $this->writerRole->id,
+        ]);
+
+        $responseDup->assertStatus(422);
+        $responseDup->assertJsonValidationErrors(['email']);
     }
 }

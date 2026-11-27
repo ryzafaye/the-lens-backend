@@ -165,6 +165,25 @@ class ArticleImage extends Model
     }
 
     /**
+     * Scope: Approved visual assets available for M&PC cover assignment
+     * (not yet published and not assigned to any article).
+     */
+    public function scopeAvailableForCover(Builder $query): Builder
+    {
+        return $query->whereIn('status', [
+            'approved',
+            'Approved',
+            'EIC Approved',
+            'eic approved',
+            'eic_approved',
+            'approved_for_mpc',
+            'Approved for MPC',
+        ])
+        ->whereNull('article_id')
+        ->where('is_cover', false);
+    }
+
+    /**
      * Scope: Assigned covers.
      */
     public function scopeCovers(Builder $query): Builder

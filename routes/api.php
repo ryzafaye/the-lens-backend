@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\WriterController;
 use App\Http\Controllers\SectionHeadController;
@@ -43,6 +44,8 @@ Route::get('sanctum/csrf-cookie', function () {
 Route::post('login', [AuthController::class, 'login'])->middleware('web');
 Route::post('logout', [AuthController::class, 'logout'])->middleware('web');
 Route::get('user', [AuthController::class, 'user'])->middleware('web');
+Route::post('forgot-password', [PasswordResetController::class, 'forgotPassword'])->middleware(['web', 'throttle:10,1']);
+Route::post('reset-password', [PasswordResetController::class, 'resetPassword'])->middleware(['web', 'throttle:10,1']);
 
 // Dashboard page endpoint for Vue SPA
 Route::get('pages/dashboard', [AuthController::class, 'dashboardPage'])->middleware('web');

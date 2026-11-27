@@ -102,13 +102,15 @@ class ExecutiveController extends Controller
         }
 
         // Cached consolidated aggregate query for 30s to keep navigation instantaneous
-        $cacheKey = $isPresOrVp ? ('executive_dashboard_stats_' . $userRole) : ('executive_dashboard_stats_' . ($category->id ?? 'all'));
-        $stats = Cache::remember($cacheKey, 30, function () use ($query, $allPendingStatuses) {
+        $userId = Auth::id() ?? 0;
+        $v = Cache::get('article_workflow_cache_v', 1);
+        $cacheKey = $isPresOrVp ? ("executive_dashboard_stats_{$userRole}_{$userId}_{$v}") : ("executive_dashboard_stats_" . ($category->id ?? 'all') . "_{$userId}_{$v}");
+        $stats = Cache::remember($cacheKey, 30, function () use ($query, $allPendingStatuses, $userId) {
             $statusList = "'" . implode("','", $allPendingStatuses) . "'";
             return (clone $query)->selectRaw("
                 COALESCE(SUM(views), 0) as total_views,
                 COUNT(CASE WHEN status = 'Published' THEN 1 END) as published_stories,
-                COUNT(CASE WHEN status IN ({$statusList}) THEN 1 END) as pending
+                COUNT(CASE WHEN status IN ({$statusList}) AND user_id != {$userId} THEN 1 END) as pending
             ")->first();
         });
 
@@ -179,9 +181,10 @@ class ExecutiveController extends Controller
             'financial_records_count' => count($financialRecords),
         ];
 
-        $submissionsCacheKey = $isPresOrVp ? ('exec_dashboard_pending_' . $userRole) : ('exec_dashboard_pending_' . ($category->id ?? 'all'));
-        $pendingArticles = Cache::remember($submissionsCacheKey, 30, function () use ($category, $allPendingStatuses) {
+        $submissionsCacheKey = $isPresOrVp ? ("exec_dashboard_pending_{$userRole}_{$userId}_{$v}") : ("exec_dashboard_pending_" . ($category->id ?? 'all') . "_{$userId}_{$v}");
+        $pendingArticles = Cache::remember($submissionsCacheKey, 30, function () use ($category, $allPendingStatuses, $userId) {
             $submissionsQuery = Article::with(['user.role', 'category'])
+                ->where('user_id', '!=', $userId)
                 ->whereIn('status', $allPendingStatuses);
             if ($category) {
                 $submissionsQuery->where('category_id', $category->id);
@@ -423,13 +426,16 @@ class ExecutiveController extends Controller
         $isPresident = $userRole === 'President';
 
         $sort = $request->query('sort', 'newest');
-        $cacheKey = "exec_review_articles_{$userRole}_{$sort}";
+        $userId = Auth::id() ?? 0;
+        $v = Cache::get('article_workflow_cache_v', 1);
+        $cacheKey = "exec_review_articles_{$userRole}_{$userId}_{$sort}_{$v}";
         $categoryHeads = $this->getCategoryHeadsMap();
 
         // President and Vice President review queue:
         // EIC/AEIC submissions go ONLY to the President for approval!
-        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads, $isPresident) {
-            $query = Article::with(['user.role', 'category']);
+        $pendingArticles = Cache::remember($cacheKey, 30, function () use ($sort, $categoryHeads, $isPresident, $userId) {
+            $query = Article::with(['user.role', 'category'])
+                ->where('user_id', '!=', $userId);
 
             if ($isPresident) {
                 // The President reviews EIC/AEIC submissions ('Pending President Review') AND general 'Pending EIC Review'
@@ -494,6 +500,13 @@ class ExecutiveController extends Controller
 
         $article = Article::findOrFail($id);
 
+        if ((int) $article->user_id === (int) Auth::id()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: You cannot review or edit your own manuscript.',
+            ], 403);
+        }
+
         $cleanContent = $this->sanitizeArticleContent($request->content);
 
         $article->update([
@@ -529,6 +542,14 @@ class ExecutiveController extends Controller
 
         $article = Article::findOrFail($id);
 
+        if ((int) $article->user_id === (int) Auth::id()) {
+            $msg = 'Unauthorized: You cannot approve your own manuscript.';
+            if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+                return response()->json(['success' => false, 'message' => $msg], 403);
+            }
+            abort(403, $msg);
+        }
+
         if ($article->status === 'Pending President Review' && $userRole !== 'President') {
             return response()->json([
                 'success' => false,
@@ -552,6 +573,9 @@ class ExecutiveController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'approved', $article);
+        if ($user) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleApproved($article, $user, 'Approved');
+        }
 
         $this->clearSubmissionCaches($article->category_id);
 
@@ -576,6 +600,14 @@ class ExecutiveController extends Controller
         $userRole = $user?->role?->role_name ?? '';
 
         $article = Article::with(['category', 'user.role'])->findOrFail($id);
+
+        if ((int) $article->user_id === (int) Auth::id()) {
+            $msg = 'Unauthorized: You cannot return your own manuscript for revision.';
+            if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
+                return response()->json(['success' => false, 'message' => $msg], 403);
+            }
+            abort(403, $msg);
+        }
 
         if ($article->status === 'Pending President Review' && $userRole !== 'President') {
             return response()->json([
@@ -604,6 +636,9 @@ class ExecutiveController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'returned for revision', $article);
+        if ($user) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleRevision($article, $user, (string) $request->remarks, $targetStatus);
+        }
 
         Article::clearArticleCaches($article);
         $this->clearSubmissionCaches($article->category_id);
@@ -908,16 +943,20 @@ class ExecutiveController extends Controller
         $rawRoleName = $user?->role?->role_name ?? '';
         $isEicOrAeic = in_array($rawRoleName, ['Editor-in-Chief', 'Associate Editor-in-Chief']);
 
+        $isDraft = strtolower(trim((string) $request->input('status'))) === 'draft'
+            || strtolower(trim((string) $request->input('action'))) === 'draft';
+
         if ($isEicOrAeic) {
-            $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending President Review';
+            $targetStatus = $isDraft ? 'Draft' : 'Pending President Review';
         } else {
             // When an executive submits an article, bypass section heads and route directly to EIC/AEIC review!
-            $targetStatus = $request->status === 'Draft' ? 'Draft' : 'Pending EIC Review';
+            $targetStatus = $isDraft ? 'Draft' : 'Pending EIC Review';
         }
 
         try {
-            if ($request->filled('article_id')) {
-                $article = Article::where('user_id', Auth::id())->find($request->article_id);
+            $incomingArticleId = $request->input('article_id') ?? $request->input('id');
+            if (!empty($incomingArticleId)) {
+                $article = Article::where('user_id', Auth::id())->find($incomingArticleId);
                 if ($article) {
                     $isRevision = in_array(strtolower(trim((string)$article->status)), [
                         'for revision', 'for writer revision', 'for head revision',
@@ -944,8 +983,11 @@ class ExecutiveController extends Controller
 
                     $this->clearSubmissionCaches($request->category_id);
 
-                    if ($targetStatus === 'Pending Review' || $targetStatus === 'Pending EIC Review') {
+                    if (in_array($targetStatus, ['Pending Review', 'Pending EIC Review', 'Pending President Review'], true)) {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                        if ($user) {
+                            app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $user);
+                        }
                     }
 
                     if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
@@ -980,8 +1022,11 @@ class ExecutiveController extends Controller
                 'shares' => 0,
             ]);
 
-            if ($targetStatus === 'Pending Review' || $targetStatus === 'Pending EIC Review') {
+            if (in_array($targetStatus, ['Pending Review', 'Pending EIC Review', 'Pending President Review'], true)) {
                 ActivityLog::logAction(Auth::id(), 'submitted', $createdArticle);
+                if ($user) {
+                    app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($createdArticle, $user);
+                }
             }
 
             $this->clearSubmissionCaches($request->category_id);
@@ -1017,6 +1062,7 @@ class ExecutiveController extends Controller
     protected function clearSubmissionCaches($categoryId = null)
     {
         $userId = Auth::id();
+        Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
         Cache::forget('executive_dashboard_stats_all');
         Cache::forget('executive_dashboard_stats_President');
         Cache::forget('executive_dashboard_stats_pres_vp');
@@ -1088,6 +1134,7 @@ class ExecutiveController extends Controller
                 'id' => (string) $officer->id,
                 'name' => $officer->full_name,
                 'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+                'email' => $officer->email ?? '',
                 'role' => $officer->role->role_name ?? 'Staff',
                 'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
                 'status' => $officer->account_status ?? 'active',
@@ -1127,7 +1174,10 @@ class ExecutiveController extends Controller
                 : Role::where('role_name', $roleVal)->first();
             $roleId = $roleObj?->id;
         }
-        $request->merge(['role_id' => $roleId]);
+        $request->merge([
+            'role_id' => $roleId,
+            'email' => strtolower(trim((string) $request->input('email', ''))),
+        ]);
 
         $validated = $request->validate([
             'student_number' => [
@@ -1136,12 +1186,22 @@ class ExecutiveController extends Controller
                 'regex:/^\d{4}-\d{5}-BN-0$/',
                 'unique:users,student_number',
             ],
+            'email' => [
+                'required',
+                'string',
+                'email:rfc',
+                'max:255',
+                'unique:users,email',
+            ],
             'full_name' => 'required|string|max:255',
             'role_id' => 'required|exists:roles,id',
         ], [
             'student_number.required' => 'Student number is required.',
             'student_number.regex' => 'The student number format must be YEAR-5DIGIT-BN-0 (e.g. 2024-00010-BN-0).',
             'student_number.unique' => 'This student number is already registered to another account.',
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please enter a valid email address.',
+            'email.unique' => 'This email address is already registered to another account.',
             'full_name.required' => 'Full name is required.',
             'role_id.required' => 'Please select a valid role.',
             'role_id.exists' => 'The selected role is invalid.',
@@ -1149,6 +1209,7 @@ class ExecutiveController extends Controller
 
         $officer = User::create([
             'student_number' => $validated['student_number'],
+            'email' => strtolower(trim($validated['email'])),
             'full_name' => $validated['full_name'],
             'role_id' => $validated['role_id'],
             'password' => Hash::make('thelenspupBN0'),
@@ -1169,6 +1230,7 @@ class ExecutiveController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
@@ -1224,6 +1286,7 @@ class ExecutiveController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
@@ -1285,6 +1348,7 @@ class ExecutiveController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
