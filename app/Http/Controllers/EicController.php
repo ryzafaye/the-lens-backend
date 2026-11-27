@@ -605,6 +605,9 @@ class EicController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'approved', $article);
+        if ($user) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleApproved($article, $user, 'Approved');
+        }
 
         Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
 
@@ -660,6 +663,11 @@ class EicController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'returned for revision', $article);
+        /** @var \App\Models\User|null $reviewer */
+        $reviewer = Auth::user();
+        if ($reviewer) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleRevision($article, $reviewer, (string) $request->remarks, $targetStatus);
+        }
 
         Article::clearArticleCaches($article);
         Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
@@ -723,6 +731,7 @@ class EicController extends Controller
 
         $this->imageService->approveByEic($image, $user);
         ActivityLog::logAction($user->id, 'approved visual artwork');
+        app(\App\Services\WorkflowNotificationService::class)->notifyMediaApproved($image, $user);
 
         Cache::forget('mpc_dashboard_stats');
 
@@ -752,6 +761,7 @@ class EicController extends Controller
 
         $this->imageService->returnForRevision($image, $user, (string) $request->remarks);
         ActivityLog::logAction($user->id, 'returned visual asset for revision');
+        app(\App\Services\WorkflowNotificationService::class)->notifyMediaRevision($image, $user, (string) $request->remarks);
 
         if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
             return response()->json([
@@ -862,6 +872,9 @@ class EicController extends Controller
 
                     if ($targetStatus === 'Pending EIC Review' || $targetStatus === 'Pending President Review') {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                        if ($currentUser) {
+                            app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $currentUser);
+                        }
                     }
 
                     Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
@@ -912,6 +925,9 @@ class EicController extends Controller
 
             if ($targetStatus === 'Pending EIC Review' || $targetStatus === 'Pending President Review') {
                 ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                if ($currentUser) {
+                    app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $currentUser);
+                }
             }
 
             Cache::put('article_workflow_cache_v', ((int) Cache::get('article_workflow_cache_v', 1)) + 1, 86400);
@@ -990,6 +1006,7 @@ class EicController extends Controller
                 'id' => (string) $officer->id,
                 'name' => $officer->full_name,
                 'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+                'email' => $officer->email ?? '',
                 'role' => $officer->role->role_name ?? 'Staff',
                 'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
                 'status' => $officer->account_status ?? 'active',
@@ -1027,7 +1044,10 @@ class EicController extends Controller
                 : Role::where('role_name', $roleVal)->first();
             $roleId = $roleObj?->id;
         }
-        $request->merge(['role_id' => $roleId]);
+        $request->merge([
+            'role_id' => $roleId,
+            'email' => strtolower(trim((string) $request->input('email', ''))),
+        ]);
 
         $validated = $request->validate([
             'student_number' => [
@@ -1036,12 +1056,22 @@ class EicController extends Controller
                 'regex:/^\d{4}-\d{5}-BN-0$/',
                 'unique:users,student_number',
             ],
+            'email' => [
+                'required',
+                'string',
+                'email:rfc',
+                'max:255',
+                'unique:users,email',
+            ],
             'full_name' => 'required|string|max:255',
             'role_id' => 'required|exists:roles,id',
         ], [
             'student_number.required' => 'Student number is required.',
             'student_number.regex' => 'The student number format must be YEAR-5DIGIT-BN-0 (e.g. 2024-00010-BN-0).',
             'student_number.unique' => 'This student number is already registered to another account.',
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please enter a valid email address.',
+            'email.unique' => 'This email address is already registered to another account.',
             'full_name.required' => 'Full name is required.',
             'role_id.required' => 'Please select a valid role.',
             'role_id.exists' => 'The selected role is invalid.',
@@ -1049,6 +1079,7 @@ class EicController extends Controller
 
         $officer = User::create([
             'student_number' => $validated['student_number'],
+            'email' => strtolower(trim($validated['email'])),
             'full_name' => $validated['full_name'],
             'role_id' => $validated['role_id'],
             'password' => Hash::make('thelenspupBN0'),
@@ -1069,6 +1100,7 @@ class EicController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
@@ -1122,6 +1154,7 @@ class EicController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
@@ -1182,6 +1215,7 @@ class EicController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',

@@ -81,8 +81,8 @@ class ArticleImageService
         $headApprovedBy = $isSectionHead ? $uploader->id : null;
 
         if (empty($title) && $fileOrData instanceof UploadedFile) {
-            $rawName = pathinfo($fileOrData->getClientOriginalName(), PATHINFO_FILENAME);
-            $title = Str::headline($rawName);
+            $rawName = trim((string) pathinfo($fileOrData->getClientOriginalName(), PATHINFO_FILENAME));
+            $title = $rawName !== '' ? $rawName : null;
         }
 
         return ArticleImage::create([
@@ -204,10 +204,17 @@ class ArticleImageService
      */
     public function assignCoverToArticle(Article $article, int|string $imageId): ArticleImage
     {
-        // Unset any previous cover for this article
-        ArticleImage::where('article_id', $article->id)->update(['is_cover' => false]);
-
         $image = ArticleImage::findOrFail($imageId);
+
+        // Release any previous cover attached to this article back to the available approved pool
+        ArticleImage::where('article_id', $article->id)
+            ->where('id', '!=', $image->id)
+            ->update([
+                'article_id' => null,
+                'is_cover' => false,
+                'status' => 'approved',
+            ]);
+
         $image->update([
             'article_id' => $article->id,
             'is_cover' => true,

@@ -56,6 +56,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Frontend SPA URL
+    |--------------------------------------------------------------------------
+    |
+    | Base URL of the Vue SPA frontend used when generating password reset links
+    | and email notification call-to-action links.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

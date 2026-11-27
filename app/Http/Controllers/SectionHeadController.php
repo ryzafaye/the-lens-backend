@@ -508,6 +508,9 @@ class SectionHeadController extends ExecutiveController
         ]);
 
         ActivityLog::logAction(Auth::id(), 'approved', $article);
+        if ($user) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleApproved($article, $user, 'Pending EIC Review');
+        }
 
         $this->clearAllRelatedCaches($article->category_id);
 
@@ -564,6 +567,9 @@ class SectionHeadController extends ExecutiveController
         ]);
 
         ActivityLog::logAction(Auth::id(), 'returned for revision', $article);
+        if ($user) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleRevision($article, $user, (string) $request->remarks, 'For Writer Revision');
+        }
 
         $this->clearAllRelatedCaches($article->category_id);
 
@@ -698,6 +704,11 @@ class SectionHeadController extends ExecutiveController
 
                     if ($targetStatus === 'Pending EIC Review') {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                        /** @var \App\Models\User|null $actor */
+                        $actor = Auth::user();
+                        if ($actor) {
+                            app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $actor);
+                        }
                     }
 
                     $msg = $targetStatus === 'Draft' ? 'Draft saved successfully.' : 'Article submitted and forwarded to Editor-in-Chief for approval.';
@@ -732,6 +743,11 @@ class SectionHeadController extends ExecutiveController
 
             if ($targetStatus === 'Pending EIC Review') {
                 ActivityLog::logAction(Auth::id(), 'submitted', $createdArticle);
+                /** @var \App\Models\User|null $actor */
+                $actor = Auth::user();
+                if ($actor) {
+                    app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($createdArticle, $actor);
+                }
             }
 
             $this->clearAllRelatedCaches($request->category_id);
@@ -942,6 +958,7 @@ class SectionHeadController extends ExecutiveController
         $article->save();
 
         ActivityLog::logAction(Auth::id(), 'submitted', $article);
+        app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $user);
 
         $this->clearAllRelatedCaches($article->category_id);
         Cache::forget('eic_dashboard_stats');

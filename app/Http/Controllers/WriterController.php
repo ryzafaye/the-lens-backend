@@ -306,6 +306,9 @@ class WriterController extends Controller
 
                     if (in_array($targetStatus, ['Pending Head Review', 'Pending Review', 'Pending EIC Review', 'Pending President Review'])) {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                        if ($user) {
+                            app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $user);
+                        }
                     }
 
                     Cache::forget('writer_dashboard_stats_' . Auth::id());
@@ -372,6 +375,9 @@ Cache::forget('eic_dashboard_pending_articles');
 
             if (in_array($targetStatus, ['Pending Head Review', 'Pending Review', 'Pending EIC Review', 'Pending President Review'])) {
                 ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                if ($user) {
+                    app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $user);
+                }
             }
 
             Cache::forget('writer_dashboard_stats_' . Auth::id());

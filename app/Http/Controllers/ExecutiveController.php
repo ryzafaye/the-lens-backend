@@ -573,6 +573,9 @@ class ExecutiveController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'approved', $article);
+        if ($user) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleApproved($article, $user, 'Approved');
+        }
 
         $this->clearSubmissionCaches($article->category_id);
 
@@ -633,6 +636,9 @@ class ExecutiveController extends Controller
         ]);
 
         ActivityLog::logAction(Auth::id(), 'returned for revision', $article);
+        if ($user) {
+            app(\App\Services\WorkflowNotificationService::class)->notifyArticleRevision($article, $user, (string) $request->remarks, $targetStatus);
+        }
 
         Article::clearArticleCaches($article);
         $this->clearSubmissionCaches($article->category_id);
@@ -965,8 +971,11 @@ class ExecutiveController extends Controller
 
                     $this->clearSubmissionCaches($request->category_id);
 
-                    if ($targetStatus === 'Pending Review' || $targetStatus === 'Pending EIC Review') {
+                    if (in_array($targetStatus, ['Pending Review', 'Pending EIC Review', 'Pending President Review'], true)) {
                         ActivityLog::logAction(Auth::id(), 'submitted', $article);
+                        if ($user) {
+                            app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($article, $user);
+                        }
                     }
 
                     if ($request->wantsJson() || $request->ajax() || $request->is('api/*')) {
@@ -1001,8 +1010,11 @@ class ExecutiveController extends Controller
                 'shares' => 0,
             ]);
 
-            if ($targetStatus === 'Pending Review' || $targetStatus === 'Pending EIC Review') {
+            if (in_array($targetStatus, ['Pending Review', 'Pending EIC Review', 'Pending President Review'], true)) {
                 ActivityLog::logAction(Auth::id(), 'submitted', $createdArticle);
+                if ($user) {
+                    app(\App\Services\WorkflowNotificationService::class)->notifyArticleSubmitted($createdArticle, $user);
+                }
             }
 
             $this->clearSubmissionCaches($request->category_id);
@@ -1110,6 +1122,7 @@ class ExecutiveController extends Controller
                 'id' => (string) $officer->id,
                 'name' => $officer->full_name,
                 'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+                'email' => $officer->email ?? '',
                 'role' => $officer->role->role_name ?? 'Staff',
                 'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
                 'status' => $officer->account_status ?? 'active',
@@ -1149,7 +1162,10 @@ class ExecutiveController extends Controller
                 : Role::where('role_name', $roleVal)->first();
             $roleId = $roleObj?->id;
         }
-        $request->merge(['role_id' => $roleId]);
+        $request->merge([
+            'role_id' => $roleId,
+            'email' => strtolower(trim((string) $request->input('email', ''))),
+        ]);
 
         $validated = $request->validate([
             'student_number' => [
@@ -1158,12 +1174,22 @@ class ExecutiveController extends Controller
                 'regex:/^\d{4}-\d{5}-BN-0$/',
                 'unique:users,student_number',
             ],
+            'email' => [
+                'required',
+                'string',
+                'email:rfc',
+                'max:255',
+                'unique:users,email',
+            ],
             'full_name' => 'required|string|max:255',
             'role_id' => 'required|exists:roles,id',
         ], [
             'student_number.required' => 'Student number is required.',
             'student_number.regex' => 'The student number format must be YEAR-5DIGIT-BN-0 (e.g. 2024-00010-BN-0).',
             'student_number.unique' => 'This student number is already registered to another account.',
+            'email.required' => 'Email address is required.',
+            'email.email' => 'Please enter a valid email address.',
+            'email.unique' => 'This email address is already registered to another account.',
             'full_name.required' => 'Full name is required.',
             'role_id.required' => 'Please select a valid role.',
             'role_id.exists' => 'The selected role is invalid.',
@@ -1171,6 +1197,7 @@ class ExecutiveController extends Controller
 
         $officer = User::create([
             'student_number' => $validated['student_number'],
+            'email' => strtolower(trim($validated['email'])),
             'full_name' => $validated['full_name'],
             'role_id' => $validated['role_id'],
             'password' => Hash::make('thelenspupBN0'),
@@ -1191,6 +1218,7 @@ class ExecutiveController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
@@ -1246,6 +1274,7 @@ class ExecutiveController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
@@ -1307,6 +1336,7 @@ class ExecutiveController extends Controller
             'id' => (string) $officer->id,
             'name' => $officer->full_name,
             'studentNumber' => $officer->student_number ?? '2024-00000-BN-0',
+            'email' => $officer->email ?? '',
             'role' => $officer->role->role_name ?? 'Staff',
             'avatar' => $officer->avatar_url ?? ($officer->avatar ? asset($officer->avatar) : asset('images/member-placeholder.svg')),
             'status' => $officer->account_status ?? 'active',
