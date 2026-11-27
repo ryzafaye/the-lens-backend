@@ -9,6 +9,7 @@ use App\Models\Role;
 use App\Models\User;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
@@ -60,10 +61,40 @@ class ForgotPasswordFlowTest extends TestCase
                 . '&email=' . urlencode($user->email);
 
             $resetUrl = $mail->viewData['resetUrl'] ?? '';
+            $expireMinutes = $mail->viewData['expireMinutes'] ?? null;
 
             return $resetUrl === $expectedPrefix
+                && $expireMinutes === 10
                 && $mail->view === 'emails.password-reset';
         });
+    }
+
+    public function test_reset_password_rejects_tokens_older_than_ten_minutes(): void
+    {
+        $user = User::create([
+            'role_id' => $this->writerRole->id,
+            'student_number' => '2024-00044-BN-0',
+            'full_name' => 'Expired Token Tester',
+            'email' => 'expired.tester@pup.edu.ph',
+            'password' => Hash::make('initialpass123'),
+            'account_status' => 'active',
+        ]);
+
+        $token = Password::broker()->createToken($user);
+
+        DB::table('password_reset_tokens')
+            ->where('email', 'expired.tester@pup.edu.ph')
+            ->update(['created_at' => now()->subMinutes(11)]);
+
+        $response = $this->postJson('/api/reset-password', [
+            'token' => $token,
+            'email' => 'expired.tester@pup.edu.ph',
+            'password' => 'newpass1234',
+            'password_confirmation' => 'newpass1234',
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertTrue(Hash::check('initialpass123', $user->fresh()->password));
     }
 
     public function test_forgot_password_prompts_for_missing_email_and_saves_it_on_system(): void

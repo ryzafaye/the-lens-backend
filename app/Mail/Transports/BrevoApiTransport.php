@@ -31,7 +31,7 @@ class BrevoApiTransport extends AbstractTransport
         $fromAddresses = $email->getFrom();
         $firstFrom = $fromAddresses[0] ?? null;
 
-        $senderEmail = $firstFrom?->getAddress() ?: (string) config('mail.from.address', 'lenspupblication.notifications@gmail.com');
+        $senderEmail = $firstFrom?->getAddress() ?: (string) config('mail.from.address', 'lenspublication.notifications@gmail.com');
         $senderName = $firstFrom?->getName() ?: (string) config('mail.from.name', 'The Lens Publication');
 
         $payload = [

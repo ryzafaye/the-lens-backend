@@ -63,7 +63,7 @@ class AppServiceProvider extends ServiceProvider
                     . '/reset-password?token=' . urlencode($token)
                     . '&email=' . urlencode((string) ($notifiable->email ?? ''));
 
-            $expireMinutes = (int) config('auth.passwords.' . config('auth.defaults.passwords', 'users') . '.expire', 60);
+            $expireMinutes = (int) config('auth.passwords.' . config('auth.defaults.passwords', 'users') . '.expire', 10);
 
             return (new MailMessage)
                 ->subject('Reset Your Password — The Lens Publication')
